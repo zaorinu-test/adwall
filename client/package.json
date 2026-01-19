@@ -1,0 +1,21 @@
+{
+  "name": "adwall-key",
+  "version": "1.0.0",
+  "description": "Minimal adwall validation between a Node.js app and a static page",
+  
+  "main": "adwall.js",
+  "license": "MIT",
+  "author": "Luis Antonio <zaorinu@gmail.com>",
+  
+  "keywords": [
+    "adwall", 
+    "validation", 
+    "nodejs"
+  ],
+
+  "engines": {
+    "node": ">=18"
+  },
+  
+  "files": ["adwall.js"]
+}
