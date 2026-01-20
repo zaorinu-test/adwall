@@ -1,6 +1,6 @@
 {
-  "name": "adwall-key",
-  "version": "1.1.1",
+  "name": "adwall",
+  "version": "1.2.0",
   "description": "Minimal adwall validation between a Node.js app and a static page",
   
   "main": "adwall.js",
