@@ -1,188 +1,56 @@
 <!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Adwall</title>
+</head>
+<body>
 <script>
-/**
- * Adwall client relay script
- * 
- * This script runs on a static page (e.g. GitHub Pages) and acts as a relay
- * between the user's browser and a local Node.js application.
- * 
- * IMPORTANT: No direct communication with localhost!
- * All parameters are passed via URL encoded in the 'c' query parameter.
- * 
- * Anti-bypass security measures:
- * - Session parameters passed via URL (no direct fetch to localhost)
- * - Validates referrer to ensure request comes from adwall page
- * - Enforces session expiration (5 min default)
- * - Enforces minimum delay before redirect (15 sec default)
- * - Uses cryptographic validation codes
- * 
- * Flow:
- * 1. User opens this page with ?c=<encoded-params>
- * 2. Script decodes parameters: sessionId, callbackUrl, adlink, minDelay
- * 3. Script displays adwall content
- * 4. Script enforces minDelay with countdown timer
- * 5. User clicks button to complete adwall (minDelay passed)
- * 6. Script generates validation code using sessionId + sharedKey
- * 7. Browser redirects to callbackUrl with validation code
- * 8. Server validates: referrer, session expiration, delay, code
- * 9. On success, redirects user to adlink
- * 
- * Notes:
- * - No server logic required on this page
- * - Shared key must match the Node.js app
- * - Referrer is sent by browser automatically (security)
- * - Tampering with URL parameters is detected and rejected
- */
-
 const SHARED_KEY = "place_your_key_here"
-let sessionData = null
 
-/**
- * Decode base64url-encoded parameters from URL
- */
 function decodeParams(encoded) {
-  try {
-    // Add padding if needed
-    let base64 = encoded
-      .replace(/-/g, '+')
-      .replace(/_/g, '/')
-    base64 += '='.repeat((4 - base64.length % 4) % 4)
-    
-    const decoded = atob(base64)
-    return JSON.parse(decoded)
-  } catch (error) {
-    console.error('Parameter decode failed:', error)
-    return null
-  }
+  let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
+  base64 += '='.repeat((4 - base64.length % 4) % 4)
+  return JSON.parse(atob(base64))
 }
 
-/**
- * Computes SHA-256 hash using Web Crypto API
- * Returns hexadecimal string
- */
 async function sha256(v) {
-  const buf = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(v)
-  )
-  return [...new Uint8Array(buf)]
-    .map(b => b.toString(16).padStart(2, "0"))
-    .join("")
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
 }
 
-/**
- * Initialize session from URL parameters
- */
-function initSession() {
-  // Extract 'c' parameter from URL
-  const params = new URLSearchParams(window.location.search)
-  const encodedParams = params.get('c')
-  
-  if (!encodedParams) {
-    showError('Missing session parameters. Invalid adwall URL.')
-    return
-  }
-  
-  // Decode session parameters
-  sessionData = decodeParams(encodedParams)
-  
-  if (!sessionData || !sessionData.s) {
-    showError('Invalid session parameters. Session data corrupted.')
-    return
-  }
-  
-  // Check session expiration
-  if (Date.now() > sessionData.e) {
-    showError('Session has expired. Please start over.')
-    return
-  }
-  
-  // Display adwall page content
-  showAdwall()
-  
-  // Enforce minimum delay before allowing redirect
+const params = new URLSearchParams(window.location.search)
+const sessionData = decodeParams(params.get('c'))
+
+if (!sessionData || Date.now() > sessionData.e) {
+  document.body.innerHTML = '<div style="padding:40px;text-align:center;">Invalid or expired session</div>'
+} else {
   const startTime = Date.now()
-  const redirectButton = document.getElementById('complete-adwall')
-  redirectButton.disabled = true
+  const btn = document.createElement('button')
   
-  // Update button countdown
-  const updateCountdown = () => {
+  btn.style.cssText = 'padding:10px 20px;font-size:14px;cursor:pointer'
+  btn.disabled = true
+  btn.textContent = 'Loading...'
+  
+  document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Adwall</h1><p>Watch this to continue</p></div>'
+  document.body.appendChild(btn)
+  
+  const tick = () => {
     const elapsed = Date.now() - startTime
     const remaining = Math.max(0, sessionData.d - elapsed)
-    redirectButton.textContent = remaining > 0 
-      ? `Complete Adwall (${Math.ceil(remaining / 1000)}s)`
-      : "Complete Adwall"
-    redirectButton.disabled = remaining > 0
-    
-    if (remaining > 0) {
-      requestAnimationFrame(updateCountdown)
-    }
+    btn.textContent = remaining > 0 ? `Wait ${Math.ceil(remaining / 1000)}s` : 'Continue'
+    btn.disabled = remaining > 0
+    if (remaining > 0) requestAnimationFrame(tick)
   }
   
-  updateCountdown()
-  redirectButton.onclick = completeAdwall
+  tick()
+  btn.onclick = async () => {
+    const code = await sha256(sessionData.s + SHARED_KEY)
+    window.location.href = `${sessionData.c}?v=${code}`
+  }
 }
-
-/**
- * Complete adwall validation
- * Generates validation code and redirects to callback URL
- * Note: Referrer is sent automatically by the browser
- */
-async function completeAdwall() {
-  if (!sessionData) return
-  
-  // Generate validation code using sessionId and shared key
-  const validationCode = await sha256(sessionData.s + SHARED_KEY)
-  
-  // Redirect to callback URL with validation code
-  // Browser automatically includes referrer header for security validation
-  window.location.href = `${sessionData.c}?v=${validationCode}`
-}
-
-/**
- * Display error message
- */
-function showError(message) {
-  document.body.innerHTML = `
-    <div style="padding: 20px; text-align: center; font-family: Arial;">
-      <h2>❌ Error</h2>
-      <p>${message}</p>
-      <button onclick="location.reload()">Retry</button>
-    </div>
-  `
-}
-
-/**
- * Display adwall page content
- */
-function showAdwall() {
-  document.body.innerHTML = `
-    <div style="padding: 40px; text-align: center; font-family: Arial; max-width: 600px; margin: 50px auto;">
-      <h1>🎁 Special Offer</h1>
-      <p>Please watch this adwall to continue</p>
-      
-      <div style="background: #f0f0f0; padding: 40px; margin: 30px 0; border-radius: 8px;">
-        <p>Advertisement content goes here</p>
-        <p style="font-size: 24px;">💰 Get your reward!</p>
-      </div>
-      
-      <button id="complete-adwall" 
-              style="padding: 15px 30px; font-size: 16px; cursor: pointer; background: #4CAF50; color: white; border: none; border-radius: 5px;">
-        Loading...
-      </button>
-      
-      <p style="margin-top: 20px; font-size: 12px; color: #666;">
-        🔒 Secure validation | Anti-bypass enabled | No direct localhost calls
-      </p>
-    </div>
-  `
-}
-
-/**
- * Main entry point
- * Initialize session from URL parameters when page loads
- */
-initSession()
 </script>
+</body>
+</html>
 
 
