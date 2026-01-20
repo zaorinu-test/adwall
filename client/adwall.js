@@ -425,7 +425,6 @@ module.exports = function adwall(config = {}) {
         if (!rateLimit.allowed) {
           const retryDate = new Date(rateLimit.nextRetryTime)
           const errorMsg = `Rate limited. Next attempt available at ${retryDate.toISOString()}`
-          if (debug) console.log(`[RATE-LIMIT] ${userIp}: ${errorMsg}`)
           
           res.statusCode = 429
           res.setHeader("Content-Type", "text/plain")
@@ -520,3 +519,4 @@ module.exports = function adwall(config = {}) {
     })
   })
 }
+
