@@ -11,20 +11,26 @@ const os = require("os")
 const { URL } = require("url")
 const https = require("https")
 
-/*
-  Computes a SHA-256 hash and returns it as a hex string.
-  Used to derive the expected validation code.
-*/
+/**
+ * Computes a SHA-256 hash of input and returns it as a hex string.
+ * Used for generating session validation codes.
+ * 
+ * @param {string} v - Value to hash
+ * @returns {string} - Hex-encoded SHA-256 hash
+ */
 function sha256(v) {
   return crypto.createHash("sha256").update(v).digest("hex")
 }
 
-/*
-  Derives a machine-specific key used for local encryption.
-
-  This binds the stored key to the current machine, making
-  the encrypted file unusable if copied elsewhere.
-*/
+/**
+ * Derives a machine-specific encryption key from system information.
+ * 
+ * This binds the stored key to the current machine, preventing
+ * the key file from being used if copied to another machine.
+ * Uses: hostname + OS platform + CPU architecture + username
+ * 
+ * @returns {Buffer} - 32-byte AES-256 key derived from machine info
+ */
 function machineKey() {
   return crypto.createHash("sha256").update(
     os.hostname() +
@@ -34,14 +40,15 @@ function machineKey() {
   ).digest()
 }
 
-/*
-  Encrypts an object using AES-256-GCM.
-
-  The output is a JSON-safe structure containing:
-  - iv: initialization vector
-  - tag: authentication tag
-  - data: encrypted payload
-*/
+/**
+ * Encrypts an object using AES-256-GCM with machine-specific key.
+ * 
+ * Uses a random IV for each encryption and includes authentication tag
+ * to detect tampering. Output is JSON-serializable.
+ * 
+ * @param {Object} obj - Object to encrypt
+ * @returns {Object} - {iv, tag, data} arrays for JSON storage
+ */
 function encrypt(obj) {
   const iv = crypto.randomBytes(12)
   const cipher = crypto.createCipheriv("aes-256-gcm", machineKey(), iv)
@@ -58,12 +65,16 @@ function encrypt(obj) {
   }
 }
 
-/*
-  Decrypts data produced by encrypt().
-
-  Throws if the data was tampered with or if the machine key
-  does not match the original one.
-*/
+/**
+ * Decrypts data produced by encrypt().
+ * 
+ * Verifies authentication tag to detect tampering.
+ * Returns error if machine key doesn't match (key moved to different machine).
+ * 
+ * @param {Object} payload - {iv, tag, data} encrypted payload
+ * @returns {Object} - Decrypted and parsed object
+ * @throws {Error} - If data is tampered or machine key doesn't match
+ */
 function decrypt(payload) {
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
@@ -81,9 +92,17 @@ function decrypt(payload) {
   return JSON.parse(data.toString())
 }
 
-/*
-  Checks whether a valid, non-expired key exists on disk.
-*/
+/**
+ * Checks whether a valid, non-expired key exists on disk.
+ * 
+ * Reads key.json, decrypts it, and verifies it hasn't expired.
+ * Returns false if file doesn't exist, can't be decrypted,
+ * or has exceeded maxAge.
+ * 
+ * @param {string} file - Path to key.json file
+ * @param {number} maxAge - Maximum age in milliseconds
+ * @returns {boolean} - True if valid key exists and hasn't expired
+ */
 function hasValidKey(file, maxAge) {
   if (!fs.existsSync(file)) return false
 
@@ -101,7 +120,19 @@ function hasValidKey(file, maxAge) {
 }
 
 /**
- * Validate token via work.ink API
+ * Validates a work.ink token via their API.
+ * 
+ * Makes HTTPS request to work.ink API to verify:
+ * - Token is marked as valid by work.ink
+ * - Token has not expired
+ * - IP address matches (if available, for proxy compatibility)
+ * 
+ * Returns validation result with detailed error messages.
+ * 
+ * @param {string} token - work.ink token to validate
+ * @param {string} userIp - User's IP address (from request)
+ * @param {boolean} debug - Enable debug logging
+ * @returns {Promise<Object>} - {valid: boolean, token?: string, error?: string}
  */
 function validateWorkinkToken(token, userIp, debug = false) {
   return new Promise((resolve) => {
@@ -110,6 +141,7 @@ function validateWorkinkToken(token, userIp, debug = false) {
     if (debug) console.log(`[DEBUG] Validating token: ${token}`)
     if (debug) console.log(`[DEBUG] User IP: ${userIp}`)
     
+    // Make HTTPS request to work.ink API
     https.get(url, (res) => {
       let data = ""
       res.on("data", chunk => data += chunk)
@@ -118,14 +150,14 @@ function validateWorkinkToken(token, userIp, debug = false) {
           const response = JSON.parse(data)
           if (debug) console.log(`[DEBUG] API Response:`, response)
           
-          // Check if token is valid
+          // Step 1: Check if token is valid according to work.ink
           if (!response.valid) {
             if (debug) console.log(`[DEBUG] Token invalid`)
             resolve({ valid: false, error: "Invalid token" })
             return
           }
           
-          // Check expiration (default 30 seconds)
+          // Step 2: Check expiration (work.ink tokens expire after ~30 seconds)
           const expiresAfter = response.info.expiresAfter
           const now = Date.now()
           if (now > expiresAfter) {
@@ -134,12 +166,10 @@ function validateWorkinkToken(token, userIp, debug = false) {
             return
           }
           
-          // Validate IP address (if available)
+          // Step 3: Validate IP address (if available, for extra security)
+          // Note: Only log mismatch, don't reject (might be behind proxy/VPN)
           if (response.info.byIp && response.info.byIp !== userIp) {
             if (debug) console.log(`[DEBUG] IP mismatch. Expected: ${response.info.byIp}, Got: ${userIp}`)
-            // Note: Don't reject on IP mismatch for now (might be behind proxy)
-            // resolve({ valid: false, error: "IP mismatch" })
-            // return
           }
           
           if (debug) console.log(`[DEBUG] Token valid! Expires in ${expiresAfter - now}ms`)
@@ -241,7 +271,9 @@ module.exports = function adwall(config = {}) {
       res.setHeader("Access-Control-Allow-Methods", "GET, POST")
       res.setHeader("Content-Type", "application/json")
 
-      // /init - Redirect back to adwall page with sessionId
+      // Endpoint 1: /init - Initialize adwall session
+      // Called when user visits adwall page, returns sessionId and timer duration
+      // Redirects back to adwall page with sid (session ID) and t (time in ms)
       if (url.pathname === "/init") {
         const redirect = url.searchParams.get("redirect") || adwall
         const sep = redirect.includes("?") ? "&" : "?"
@@ -251,7 +283,9 @@ module.exports = function adwall(config = {}) {
         return
       }
 
-      // /link - Redirect to work.ink
+      // Endpoint 2: /link - Redirect to work.ink
+      // Called after adwall timer completes, redirects to work.ink
+      // work.ink will replace {TOKEN} and redirect back to adwall with token parameter
       if (url.pathname === "/link") {
         const sid = url.searchParams.get("sid")
         if (!sid || !sessions.has(sid)) {
@@ -260,8 +294,8 @@ module.exports = function adwall(config = {}) {
           return
         }
         
-        // Redirect to work.ink - work.ink will replace {TOKEN} with actual token
-        // and redirect back to adwall page with the token
+        // Redirect to work.ink - it will replace {TOKEN} placeholder with actual token
+        // and redirect browser back to adwall page with token parameter
         const redirectUrl = `${adwall}?token={TOKEN}`
         res.statusCode = 302
         res.setHeader("Location", `https://work.ink/2fpz/cream-key?redirect=${encodeURIComponent(redirectUrl)}`)
@@ -269,9 +303,11 @@ module.exports = function adwall(config = {}) {
         return
       }
 
-      // /validate - Validate work.ink token
+      // Endpoint 3: /validate - Validate work.ink token and store key
+      // Final step: receives token from work.ink, validates it, and stores encrypted key
       if (url.pathname === "/validate") {
         const token = url.searchParams.get("token")
+        // Extract user IP (may be proxied via x-forwarded-for header)
         const userIp = req.headers["x-forwarded-for"]?.split(",")[0] || req.connection.remoteAddress
         
         if (!token) {
@@ -280,8 +316,8 @@ module.exports = function adwall(config = {}) {
           return
         }
         
-        // Validate token via work.ink API (with debugging)
-        validateWorkinkToken(token, userIp, true).then(result => {
+        // Validate token via work.ink API
+        validateWorkinkToken(token, userIp).then(result => {
           res.setHeader("Content-Type", "application/json")
           
           if (!result.valid) {
@@ -293,18 +329,42 @@ module.exports = function adwall(config = {}) {
             return
           }
           
-          // Success - store key
+          // Token is valid! Now store the encrypted key locally
+          const now = Date.now()
+          const createdAt = now
+          const expiresAt = createdAt + maxAge
+          
+          // Write encrypted key to disk
+          // Contains: {valid: true, at: timestamp}
+          // Encrypted with machine-specific key
           fs.writeFileSync(
             keyFile,
             JSON.stringify(
-              encrypt({ valid: true, at: Date.now() }),
+              encrypt({ valid: true, at: createdAt }),
               null,
               2
             )
           )
           
           console.log("[SUCCESS] Key validated and stored")
-          res.end(JSON.stringify({ valid: true }))
+          
+          // Detect if request came from browser (by User-Agent)
+          const userAgent = req.headers["user-agent"] || ""
+          const isBrowser = /Mozilla|Chrome|Safari|Firefox|Edg/i.test(userAgent)
+          
+          if (isBrowser) {
+            // Browser: Return plain text with expiration info
+            const timeLeft = expiresAt - now
+            const daysLeft = Math.ceil(timeLeft / (1000 * 60 * 60 * 24))
+            res.setHeader("Content-Type", "text/plain")
+            res.end(`Your key is valid, return to the app\nExpires in: ${daysLeft} days`)
+          } else {
+            // API/Script: Return JSON with expiration time in milliseconds
+            res.setHeader("Content-Type", "application/json")
+            res.end(JSON.stringify({ valid: true, expiresIn: expiresAt - now }))
+          }
+          
+          // Close server and resolve promise
           server.close()
           resolve({ valid: true, url: null })
         })
