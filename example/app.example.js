@@ -54,25 +54,30 @@ const adwall = require("../client/adwall")
      * If a URL is returned, the user must open it in a browser
      * to complete the adwall validation.
      * 
+     * The URL contains encoded session parameters in the 'c' query parameter.
+     * This avoids direct localhost calls from the remote page (CORS issues).
+     * 
      * Anti-bypass measures enforce:
      * 1. Request must come from the adwall page (referrer validation)
      * 2. Session expires after 5 minutes (prevents replay attacks)
      * 3. Minimum 15 second delay before redirect (ensures user interaction)
+     * 4. Session parameters encoded in URL (prevents tampering)
      * 
-     * The site will:
-     * 1. Call /init to get sessionId, callbackUrl, and adlink
+     * The adwall page will:
+     * 1. Decode session parameters from URL (no localhost calls)
      * 2. Display the adwall page
-     * 3. Wait at least minDelay milliseconds
+     * 3. Wait at least minDelay milliseconds with countdown
      * 4. Generate validation code using sessionId and sharedKey
      * 5. Redirect to callbackUrl with validation code
      * 6. App validates referrer, session expiration, and delay
-     * 7. On success, open adlink in browser
+     * 7. On success, user is redirected to adlink (target URL)
      */
     if (url) {
       console.log("\n🔐 Adwall validation required")
       console.log("Please visit: " + url)
       console.log("\n⏱️  Waiting for validation... (minimum 15 seconds)")
-      console.log("📋 Referrer validation enabled - prevents bypass\n")
+      console.log("📋 Session parameters encoded in URL (no direct localhost calls)")
+      console.log("🔒 Referrer validation enabled - prevents bypass\n")
     }
 
     /**

@@ -105,14 +105,15 @@ function hasValidKey(file, maxAge) {
  * Workflow:
  * 1. Check if valid key already exists locally
  * 2. If yes: resolve immediately with valid=true
- * 3. If no: start local HTTP server and return adwall URL
- * 4. User visits URL, site calls /init to get sessionId and adlink
- * 5. Site validates referrer to prevent bypass attempts
- * 6. Site generates validation code and redirects to adlink
+ * 3. If no: start local HTTP server and generate session parameters
+ * 4. Return adwall URL with encoded sessionId in query/hash (no direct localhost calls)
+ * 5. User opens adwall page in browser (page handles timeout and validation)
+ * 6. Page generates validation code and redirects to callbackUrl
  * 7. Server validates code, referrer, and sessionId
  * 8. Stores encrypted key locally
  * 
  * Anti-bypass measures:
+ * - Session parameters encoded in URL (prevents direct localhost requests)
  * - Referrer validation to ensure requests come from adwall page
  * - SessionId expiration to prevent replay attacks
  * - Machine-specific encryption for stored keys
@@ -137,6 +138,7 @@ function hasValidKey(file, maxAge) {
  *   sharedKey: "your-secret-key",
  *   minDelay: 10000
  * })
+ * // Returns URL like: https://example.com/adwall?c=<encoded-params>
  */
 module.exports = function adwall(config = {}) {
   // Validate required arguments
@@ -186,23 +188,38 @@ module.exports = function adwall(config = {}) {
     const startTime = Date.now()
     const adwallUrlObj = new URL(adwallUrl)
     const expectedReferrer = adwallUrlObj.origin  // Anti-bypass: validate referrer domain
+    
+    // Encode session parameters to pass via URL (avoid direct localhost calls from remote page)
+    const sessionParams = {
+      s: sessionId,           // session id
+      c: `http://localhost:${port}/`,  // callback url
+      a: adlink,              // adwall link (target after validation)
+      d: minDelay,            // min delay
+      t: sessionTimeout,      // session timeout
+      e: Date.now() + sessionTimeout  // expiration timestamp
+    }
+    
+    // Encode as base64url for URL-safe transmission
+    const encodedParams = Buffer.from(JSON.stringify(sessionParams))
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '')
 
     // Create local HTTP server for validation flow
     const server = http.createServer((req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`)
 
       // Endpoint 1: /init
-      // The adwall page calls this to get:
-      // - sessionId: unique identifier for this session
-      // - callbackUrl: where to redirect after validation
-      // - adlink: target URL to open after successful validation
-      // - minDelay: minimum delay before redirect is allowed (ms)
-      // - sessionTimeout: when this session expires
+      // Deprecated - kept for backward compatibility
+      // The adwall page no longer calls this directly to avoid CORS issues
       if (url.pathname === "/init") {
         res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({
+          error: "deprecated",
+          message: "This endpoint is deprecated. Session parameters are now passed via URL.",
           sessionId,
-          callbackUrl: `http://${req.headers.host}/`,
+          callbackUrl: `http://localhost:${port}/`,
           adlink,
           minDelay,
           sessionTimeout,
@@ -290,10 +307,11 @@ module.exports = function adwall(config = {}) {
       res.end()
     })
 
-    // Start server and return adwall URL (without query params)
-    // The adwall page will call /init to get sessionId and callbackUrl
+    // Start server and return adwall URL with encoded session parameters
+    // The adwall page receives parameters via URL, not via direct localhost calls
     server.listen(port, () => {
-      resolve({ valid: false, url: adwallUrl })
+      const adwallUrlWithParams = `${adwallUrl}?c=${encodedParams}`
+      resolve({ valid: false, url: adwallUrlWithParams })
     })
   })
 }

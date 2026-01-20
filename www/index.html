@@ -6,31 +6,55 @@
  * This script runs on a static page (e.g. GitHub Pages) and acts as a relay
  * between the user's browser and a local Node.js application.
  * 
+ * IMPORTANT: No direct communication with localhost!
+ * All parameters are passed via URL encoded in the 'c' query parameter.
+ * 
  * Anti-bypass security measures:
+ * - Session parameters passed via URL (no direct fetch to localhost)
  * - Validates referrer to ensure request comes from adwall page
  * - Enforces session expiration (5 min default)
  * - Enforces minimum delay before redirect (15 sec default)
  * - Uses cryptographic validation codes
  * 
  * Flow:
- * 1. User opens this page in a browser
- * 2. If no hash present, page calls /init to get sessionId, adlink, etc
- * 3. /init validates request and returns session parameters
- * 4. Script displays adwall content and enforces minDelay
- * 5. Script generates validation code using sessionId + sharedKey
- * 6. Browser redirects to callbackUrl with validation code and referrer
- * 7. Server validates: referrer, session expiration, and delay
- * 8. On success, user is redirected to adlink (the target URL)
+ * 1. User opens this page with ?c=<encoded-params>
+ * 2. Script decodes parameters: sessionId, callbackUrl, adlink, minDelay
+ * 3. Script displays adwall content
+ * 4. Script enforces minDelay with countdown timer
+ * 5. User clicks button to complete adwall (minDelay passed)
+ * 6. Script generates validation code using sessionId + sharedKey
+ * 7. Browser redirects to callbackUrl with validation code
+ * 8. Server validates: referrer, session expiration, delay, code
+ * 9. On success, redirects user to adlink
  * 
  * Notes:
  * - No server logic required on this page
  * - Shared key must match the Node.js app
- * - Referrer is sent by browser automatically (not in URL hash)
- * - Tampering with URL hash is detected and rejected
+ * - Referrer is sent by browser automatically (security)
+ * - Tampering with URL parameters is detected and rejected
  */
 
 const SHARED_KEY = "place_your_key_here"
 let sessionData = null
+
+/**
+ * Decode base64url-encoded parameters from URL
+ */
+function decodeParams(encoded) {
+  try {
+    // Add padding if needed
+    let base64 = encoded
+      .replace(/-/g, '+')
+      .replace(/_/g, '/')
+    base64 += '='.repeat((4 - base64.length % 4) % 4)
+    
+    const decoded = atob(base64)
+    return JSON.parse(decoded)
+  } catch (error) {
+    console.error('Parameter decode failed:', error)
+    return null
+  }
+}
 
 /**
  * Computes SHA-256 hash using Web Crypto API
@@ -47,60 +71,72 @@ async function sha256(v) {
 }
 
 /**
- * Initialize session by calling /init endpoint
- * Retrieves sessionId, adlink, minDelay, and other parameters
+ * Initialize session from URL parameters
  */
-async function initSession() {
-  try {
-    const response = await fetch('http://localhost:4173/init')
-    if (!response.ok) throw new Error('Init request failed')
-    
-    sessionData = await response.json()
-    
-    // Display adwall page content
-    showAdwall()
-    
-    // Enforce minimum delay before allowing redirect
-    const startTime = Date.now()
-    const redirectButton = document.getElementById('complete-adwall')
-    redirectButton.disabled = true
-    
-    // Update button countdown
-    const updateCountdown = () => {
-      const elapsed = Date.now() - startTime
-      const remaining = Math.max(0, sessionData.minDelay - elapsed)
-      redirectButton.textContent = remaining > 0 
-        ? `Complete Adwall (${Math.ceil(remaining / 1000)}s)`
-        : "Complete Adwall"
-      redirectButton.disabled = remaining > 0
-      
-      if (remaining > 0) {
-        requestAnimationFrame(updateCountdown)
-      }
-    }
-    
-    updateCountdown()
-    redirectButton.onclick = completeAdwall
-    
-  } catch (error) {
-    console.error('Session init failed:', error)
-    showError('Failed to initialize adwall session. Please refresh.')
+function initSession() {
+  // Extract 'c' parameter from URL
+  const params = new URLSearchParams(window.location.search)
+  const encodedParams = params.get('c')
+  
+  if (!encodedParams) {
+    showError('Missing session parameters. Invalid adwall URL.')
+    return
   }
+  
+  // Decode session parameters
+  sessionData = decodeParams(encodedParams)
+  
+  if (!sessionData || !sessionData.s) {
+    showError('Invalid session parameters. Session data corrupted.')
+    return
+  }
+  
+  // Check session expiration
+  if (Date.now() > sessionData.e) {
+    showError('Session has expired. Please start over.')
+    return
+  }
+  
+  // Display adwall page content
+  showAdwall()
+  
+  // Enforce minimum delay before allowing redirect
+  const startTime = Date.now()
+  const redirectButton = document.getElementById('complete-adwall')
+  redirectButton.disabled = true
+  
+  // Update button countdown
+  const updateCountdown = () => {
+    const elapsed = Date.now() - startTime
+    const remaining = Math.max(0, sessionData.d - elapsed)
+    redirectButton.textContent = remaining > 0 
+      ? `Complete Adwall (${Math.ceil(remaining / 1000)}s)`
+      : "Complete Adwall"
+    redirectButton.disabled = remaining > 0
+    
+    if (remaining > 0) {
+      requestAnimationFrame(updateCountdown)
+    }
+  }
+  
+  updateCountdown()
+  redirectButton.onclick = completeAdwall
 }
 
 /**
  * Complete adwall validation
  * Generates validation code and redirects to callback URL
+ * Note: Referrer is sent automatically by the browser
  */
 async function completeAdwall() {
   if (!sessionData) return
   
-  // Generate validation code
-  const validationCode = await sha256(sessionData.sessionId + SHARED_KEY)
+  // Generate validation code using sessionId and shared key
+  const validationCode = await sha256(sessionData.s + SHARED_KEY)
   
-  // Redirect to callback with validation code
-  // Browser automatically includes referrer header for anti-bypass validation
-  window.location.href = `${sessionData.callbackUrl}?v=${validationCode}`
+  // Redirect to callback URL with validation code
+  // Browser automatically includes referrer header for security validation
+  window.location.href = `${sessionData.c}?v=${validationCode}`
 }
 
 /**
@@ -136,7 +172,7 @@ function showAdwall() {
       </button>
       
       <p style="margin-top: 20px; font-size: 12px; color: #666;">
-        🔒 Secure validation | Anti-bypass enabled
+        🔒 Secure validation | Anti-bypass enabled | No direct localhost calls
       </p>
     </div>
   `
@@ -144,15 +180,9 @@ function showAdwall() {
 
 /**
  * Main entry point
- * Check if this is the initial load or a return from the app
+ * Initialize session from URL parameters when page loads
  */
-if (!location.hash) {
-  // Initial load - initialize session
-  initSession()
-} else {
-  // This shouldn't happen in normal flow
-  // (callback redirects to app, not back to this page)
-  showError('Invalid redirect. Please start over.')
-}
+initSession()
 </script>
+
 
