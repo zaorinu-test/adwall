@@ -233,7 +233,7 @@ module.exports = function adwall(config = {}) {
         return
       }
 
-      // /link - Generate work.ink token and redirect
+      // /link - Redirect to work.ink
       if (url.pathname === "/link") {
         const sid = url.searchParams.get("sid")
         if (!sessions.has(sid)) {
@@ -242,11 +242,10 @@ module.exports = function adwall(config = {}) {
           return
         }
         
-        // Generate token via work.ink
-        // User will complete the offer and get redirected back
-        const validateUrl = encodeURIComponent(`${adwallHost}/validate?sid=${sid}`)
+        // Redirect to work.ink with redirect back to pages/adwall
+        const adwallWithToken = `${adwall}?token={TOKEN}`
         res.statusCode = 302
-        res.setHeader("Location", `https://work.ink/token?redirect=${validateUrl}`)
+        res.setHeader("Location", `https://work.ink/2fpz/cream-key?redirect=${encodeURIComponent(adwallWithToken)}`)
         res.end()
         return
       }

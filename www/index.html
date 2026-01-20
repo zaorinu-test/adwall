@@ -9,22 +9,21 @@
 const SHARED_KEY = "place_your_key_here"
 const LOCAL_URL = "http://localhost:4173"
 
-// Get sessionId from URL or redirect to /init
+// Get token or sessionId from URL
 const params = new URLSearchParams(window.location.search)
+const token = params.get('token')
 const sessionId = params.get('sid')
 
-if (!sessionId) {
-  // Redirect to /init to get session
+// If we have token, redirect to localhost validation
+if (token) {
+  window.location.href = `${LOCAL_URL}/validate?token=${token}`
+} else if (!sessionId) {
+  // No sessionId, redirect to /init
   window.location.href = `${LOCAL_URL}/init?redirect=${encodeURIComponent(window.location.href)}`
 } else {
   // We have sessionId, show adwall
   let minTime = params.get('t') || 15000
   minTime = parseInt(minTime)
-
-  async function sha256(v) {
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
-  }
 
   const startTime = Date.now()
   const btn = document.createElement('button')
