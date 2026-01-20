@@ -9,6 +9,7 @@ const crypto = require("crypto")
 const fs = require("fs")
 const os = require("os")
 const { URL } = require("url")
+const https = require("https")
 
 /*
   Computes a SHA-256 hash and returns it as a hex string.
@@ -97,6 +98,44 @@ function hasValidKey(file, maxAge) {
   } catch {
     return false
   }
+}
+
+/**
+ * Validate token via work.ink API
+ */
+function validateWorkinkToken(token, userIp) {
+  return new Promise((resolve) => {
+    const url = `https://work.ink/_api/v2/token/isValid/${token}?forbiddenOnFail=1`
+    
+    https.get(url, (res) => {
+      let data = ""
+      res.on("data", chunk => data += chunk)
+      res.on("end", () => {
+        try {
+          const response = JSON.parse(data)
+          
+          // Check if token is valid
+          if (!response.valid) {
+            resolve({ valid: false, error: "Invalid token" })
+            return
+          }
+          
+          // Validate IP address
+          if (response.info.byIp !== userIp) {
+            resolve({ valid: false, error: "IP mismatch" })
+            return
+          }
+          
+          // Token is valid
+          resolve({ valid: true, token: response.info.token })
+        } catch (e) {
+          resolve({ valid: false, error: "Validation error" })
+        }
+      })
+    }).on("error", () => {
+      resolve({ valid: false, error: "API error" })
+    })
+  })
 }
 
 /**
@@ -194,7 +233,7 @@ module.exports = function adwall(config = {}) {
         return
       }
 
-      // /link - Redirect to adlink
+      // /link - Generate work.ink token and redirect
       if (url.pathname === "/link") {
         const sid = url.searchParams.get("sid")
         if (!sessions.has(sid)) {
@@ -202,72 +241,55 @@ module.exports = function adwall(config = {}) {
           res.end(JSON.stringify({ error: "Invalid session" }))
           return
         }
+        
+        // Generate token via work.ink
+        // User will complete the offer and get redirected back
+        const validateUrl = encodeURIComponent(`${adwallHost}/validate?sid=${sid}`)
         res.statusCode = 302
-        res.setHeader("Location", adlink)
+        res.setHeader("Location", `https://work.ink/token?redirect=${validateUrl}`)
         res.end()
         return
       }
 
-      // /validate - Verify validation code
+      // /validate - Validate work.ink token
       if (url.pathname === "/validate") {
         const sid = url.searchParams.get("sid")
-        const v = url.searchParams.get("v")
-        const referrer = req.headers.referer || ""
-
+        const token = url.searchParams.get("token")
+        const userIp = req.headers["x-forwarded-for"] || req.connection.remoteAddress
+        
         const session = sessions.get(sid)
         if (!session) {
           res.statusCode = 404
           res.end(JSON.stringify({ error: "Invalid session" }))
           return
         }
-
-        // Check referrer (must come from adlink)
-        const referrerHost = referrer ? new URL(referrer).origin : ""
-        const adlinkHost = new URL(adlink).origin
-        if (referrerHost !== adlinkHost) {
-          res.statusCode = 403
-          res.end(JSON.stringify({
-            error: "Invalid referrer",
-            message: "Please complete the adwall and try again"
-          }))
-          return
-        }
-
-        // Check elapsed time
-        const elapsed = Date.now() - session.startTime
-        if (elapsed < session.minTime) {
-          res.statusCode = 428
-          res.end(JSON.stringify({
-            error: "Too fast",
-            message: "Please try again"
-          }))
-          return
-        }
-
-        // Validate code
-        if (v !== session.expected) {
-          res.statusCode = 401
-          res.end(JSON.stringify({
-            error: "Invalid code",
-            message: "Please try again"
-          }))
-          return
-        }
-
-        // Success - store key
-        fs.writeFileSync(
-          keyFile,
-          JSON.stringify(
-            encrypt({ valid: true, at: Date.now() }),
-            null,
-            2
+        
+        // Validate token via work.ink API
+        validateWorkinkToken(token, userIp).then(result => {
+          if (!result.valid) {
+            res.statusCode = 400
+            res.end(JSON.stringify({
+              error: "Token validation failed",
+              message: "Please try again"
+            }))
+            return
+          }
+          
+          // Success - store key
+          fs.writeFileSync(
+            keyFile,
+            JSON.stringify(
+              encrypt({ valid: true, at: Date.now() }),
+              null,
+              2
+            )
           )
-        )
-
-        session.validated = true
-        res.end(JSON.stringify({ valid: true }))
-        server.close()
-        resolve({ valid: true, url: null })
+          
+          session.validated = true
+          res.end(JSON.stringify({ valid: true }))
+          server.close()
+          resolve({ valid: true, url: null })
+        })
         return
       }
 

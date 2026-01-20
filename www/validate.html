@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Validating...</title>
+</head>
+<body>
+<script>
+const LOCAL_URL = "http://localhost:4173"
+const params = new URLSearchParams(window.location.search)
+const sid = params.get('sid')
+const token = params.get('token')
+
+if (!sid || !token) {
+  document.body.innerHTML = '<div style="padding:40px;text-align:center;">Invalid parameters</div>'
+} else {
+  document.body.innerHTML = '<div style="padding:40px;text-align:center;">Validating...</div>'
+  
+  // Call /validate endpoint
+  fetch(`${LOCAL_URL}/validate?sid=${sid}&token=${token}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.valid) {
+        document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h2>Success!</h2><p>Key validated</p></div>'
+      } else {
+        document.body.innerHTML = `<div style="padding:40px;text-align:center;"><h2>Error</h2><p>${data.message || 'Validation failed'}</p><button onclick="history.back()">Try again</button></div>`
+      }
+    })
+    .catch(e => {
+      document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h2>Error</h2><p>Connection error</p><button onclick="location.reload()">Retry</button></div>'
+    })
+}
+</script>
+</body>
+</html>
