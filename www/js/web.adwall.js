@@ -1,10 +1,10 @@
 const SHARED_KEY = "place_your_key_here"
 const LOCAL_URL = "http://localhost:4173"
-const MINIMUM_VALIDATION_TIME = 20000 // 20 seconds (intencional)
+const MINIMUM_VALIDATION_TIME = 20000 // 20 seconds
 const MAX_KEYS_RATE = 1
 const RATE_LIMIT_STORAGE_KEY = 'adwall_key_timestamps'
 const START_TIME_KEY = 'adwall_start_time'
-const RATE_WINDOW_MS = 20 * 1000 // 20s mesmo
+const RATE_WINDOW_MS = 20 * 1000 // 20s
 
 /* ---------------- utils ---------------- */
 

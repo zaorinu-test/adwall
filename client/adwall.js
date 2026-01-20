@@ -135,8 +135,8 @@ const validationAttempts = new Map()
  */
 function checkIPRateLimit(ipAddress) {
   const now = Date.now()
-  const oneHourMs = 60 * 60 * 1000
-  const oneHourAgo = now - oneHourMs
+  const ratelimitMs = 20 * 1000
+  const twentyMinsAgo = now - ratelimitMs
   
   // Get or create array for this IP
   if (!validationAttempts.has(ipAddress)) {
@@ -146,7 +146,7 @@ function checkIPRateLimit(ipAddress) {
   const attempts = validationAttempts.get(ipAddress)
   
   // Remove old attempts (older than 1 hour)
-  const recentAttempts = attempts.filter(ts => ts > oneHourAgo)
+  const recentAttempts = attempts.filter(ts => ts > twentyMinsAgo)
   
   // Update the map with only recent attempts
   validationAttempts.set(ipAddress, recentAttempts)
@@ -154,7 +154,7 @@ function checkIPRateLimit(ipAddress) {
   // Check if limit exceeded (max 1 per hour)
   if (recentAttempts.length >= 1) {
     const oldestAttempt = Math.min(...recentAttempts)
-    const nextRetryTime = oldestAttempt + oneHourMs
+    const nextRetryTime = oldestAttempt + ratelimitMs
     return {
       allowed: false,
       nextRetryTime,
@@ -336,9 +336,9 @@ module.exports = function adwall(config = {}) {
     adwall,
     adlink,
     time,
-    port = 4173,
+    port = 4173, // Default port, needs to be the same on web
     keyFile = "key.json",
-    maxAge = 1000 * 60 * 60 * 24 * 30
+    maxAge = 1000 * 60 * 60 * 24 // Default: 1 day
   } = config
 
   return new Promise(resolve => {
@@ -425,7 +425,7 @@ module.exports = function adwall(config = {}) {
         if (!rateLimit.allowed) {
           const retryDate = new Date(rateLimit.nextRetryTime)
           const errorMsg = `Rate limited. Next attempt available at ${retryDate.toISOString()}`
-          if (console.log) console.log(`[RATE-LIMIT] ${userIp}: ${errorMsg}`)
+          if (debug) console.log(`[RATE-LIMIT] ${userIp}: ${errorMsg}`)
           
           res.statusCode = 429
           res.setHeader("Content-Type", "text/plain")
@@ -440,7 +440,7 @@ module.exports = function adwall(config = {}) {
         
         if (elapsedSinceStart < minimumDelay) {
           const remainingDelay = minimumDelay - elapsedSinceStart
-          if (console.log) console.log(`[SECURITY] Validation attempt too early. Elapsed: ${elapsedSinceStart}ms, Required: ${minimumDelay}ms`)
+          if (debug) console.log(`[SECURITY] Validation attempt too early. Elapsed: ${elapsedSinceStart}ms, Required: ${minimumDelay}ms`)
           
           res.statusCode = 400
           res.setHeader("Content-Type", "text/plain")
@@ -480,8 +480,6 @@ module.exports = function adwall(config = {}) {
               2
             )
           )
-          
-          console.log("[SUCCESS] Key validated and stored")
           
           // Detect if request came from browser (by User-Agent)
           const userAgent = req.headers["user-agent"] || ""
