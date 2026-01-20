@@ -2,6 +2,8 @@
 
 Common issues and how to fix them.
 
+**[Usage Guide](./usage.md)** ‧ **[API Reference](./api.md)** ‧ **[Security](./security.md)** ‧ **[Troubleshooting](./troubleshooting.md)**
+
 ## Token Issues
 
 ### "Token expired"
