@@ -6,47 +6,7 @@
 </head>
 <body>
 <script>
-const SHARED_KEY = "place_your_key_here"
-const LOCAL_URL = "http://localhost:4173"
 
-// Get token or sessionId from URL
-const params = new URLSearchParams(window.location.search)
-const token = params.get('token')
-const sessionId = params.get('sid')
-
-// If we have token, redirect to localhost validation directly
-if (token) {
-  window.location.href = `${LOCAL_URL}/validate?token=${token}`
-} else if (!sessionId) {
-  // No sessionId, redirect to /init
-  window.location.href = `${LOCAL_URL}/init?redirect=${encodeURIComponent(window.location.href)}`
-} else {
-  // We have sessionId, show adwall
-  let minTime = params.get('t') || 15000
-  minTime = parseInt(minTime)
-
-  const startTime = Date.now()
-  const btn = document.createElement('button')
-  btn.style.cssText = 'padding:10px 20px;font-size:14px;cursor:pointer'
-  btn.disabled = true
-
-  document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Adwall</h1><p>Complete to continue</p></div>'
-  document.body.appendChild(btn)
-
-  const tick = () => {
-    const elapsed = Date.now() - startTime
-    const remaining = Math.max(0, minTime - elapsed)
-    btn.textContent = remaining > 0 ? `Wait ${Math.ceil(remaining / 1000)}s` : 'Continue'
-    btn.disabled = remaining > 0
-    if (remaining > 0) requestAnimationFrame(tick)
-  }
-
-  tick()
-
-  btn.onclick = () => {
-    window.location.href = `${LOCAL_URL}/link?sid=${sessionId}`
-  }
-}
 </script>
 </body>
 </html>

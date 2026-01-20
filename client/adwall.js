@@ -120,6 +120,106 @@ function hasValidKey(file, maxAge) {
 }
 
 /**
+ * Tracks validation attempts per IP address to prevent mass automation.
+ * Stores timestamps of successful key validations.
+ * 
+ * @type {Map<string, number[]>}
+ */
+const validationAttempts = new Map()
+
+/**
+ * Checks if an IP has exceeded the rate limit (1 key per hour).
+ * 
+ * @param {string} ipAddress - IP address to check
+ * @returns {Object} - {allowed: boolean, nextRetryTime?: number, recentCount?: number}
+ */
+function checkIPRateLimit(ipAddress) {
+  const now = Date.now()
+  const oneHourMs = 60 * 60 * 1000
+  const oneHourAgo = now - oneHourMs
+  
+  // Get or create array for this IP
+  if (!validationAttempts.has(ipAddress)) {
+    validationAttempts.set(ipAddress, [])
+  }
+  
+  const attempts = validationAttempts.get(ipAddress)
+  
+  // Remove old attempts (older than 1 hour)
+  const recentAttempts = attempts.filter(ts => ts > oneHourAgo)
+  
+  // Update the map with only recent attempts
+  validationAttempts.set(ipAddress, recentAttempts)
+  
+  // Check if limit exceeded (max 1 per hour)
+  if (recentAttempts.length >= 1) {
+    const oldestAttempt = Math.min(...recentAttempts)
+    const nextRetryTime = oldestAttempt + oneHourMs
+    return {
+      allowed: false,
+      nextRetryTime,
+      recentCount: recentAttempts.length
+    }
+  }
+  
+  return { allowed: true }
+}
+
+/**
+ * Records a successful validation for an IP address.
+ * 
+ * @param {string} ipAddress - IP address that validated
+ */
+function recordValidation(ipAddress) {
+  if (!validationAttempts.has(ipAddress)) {
+    validationAttempts.set(ipAddress, [])
+  }
+  validationAttempts.get(ipAddress).push(Date.now())
+}
+
+/**
+ * Re-validates stored key periodically to detect key theft/misuse
+ * Runs every 7 minutes if a valid key exists
+ * If validation fails, the key is removed and user must re-validate
+ * 
+ * Completely silent operation - no console output
+ * 
+ * @param {string} keyFile - Path to key.json file
+ * @param {number} maxAge - Maximum age in milliseconds
+ * @returns {void}
+ */
+function startKeyRevalidation(keyFile, maxAge) {
+  const revalidationInterval = 7 * 60 * 1000 // 7 minutes
+  
+  setInterval(() => {
+    if (!fs.existsSync(keyFile)) return
+    
+    try {
+      const raw = JSON.parse(fs.readFileSync(keyFile, "utf8"))
+      const decrypted = decrypt(raw)
+      
+      if (!decrypted.valid) return
+      
+      // Check if key has expired
+      const age = Date.now() - decrypted.at
+      if (age > maxAge) {
+        // Key expired - remove it silently
+        try {
+          fs.unlinkSync(keyFile)
+        } catch {}
+        return
+      }
+    } catch (e) {
+      // If decryption fails, key is compromised or moved to different machine
+      // Remove it silently
+      try {
+        fs.unlinkSync(keyFile)
+      } catch {}
+    }
+  }, revalidationInterval)
+}
+
+/**
  * Validates a work.ink token via their API.
  * 
  * Makes HTTPS request to work.ink API to verify:
@@ -244,6 +344,8 @@ module.exports = function adwall(config = {}) {
   return new Promise(resolve => {
     // Check if valid key exists
     if (hasValidKey(keyFile, maxAge)) {
+      // Start periodic re-validation in background (doesn't block app)
+      startKeyRevalidation(keyFile, maxAge)
       resolve({ valid: true, url: null })
       return
     }
@@ -305,6 +407,8 @@ module.exports = function adwall(config = {}) {
 
       // Endpoint 3: /validate - Validate work.ink token and store key
       // Final step: receives token from work.ink, validates it, and stores encrypted key
+      // Enforces 20-second minimum delay before validation
+      // Enforces rate limit: max 1 key per hour per IP
       if (url.pathname === "/validate") {
         const token = url.searchParams.get("token")
         // Extract user IP (may be proxied via x-forwarded-for header)
@@ -313,6 +417,34 @@ module.exports = function adwall(config = {}) {
         if (!token) {
           res.statusCode = 400
           res.end(JSON.stringify({ error: "Missing token" }))
+          return
+        }
+        
+        // Check IP-based rate limit (1 key per hour)
+        const rateLimit = checkIPRateLimit(userIp)
+        if (!rateLimit.allowed) {
+          const retryDate = new Date(rateLimit.nextRetryTime)
+          const errorMsg = `Rate limited. Next attempt available at ${retryDate.toISOString()}`
+          if (console.log) console.log(`[RATE-LIMIT] ${userIp}: ${errorMsg}`)
+          
+          res.statusCode = 429
+          res.setHeader("Content-Type", "text/plain")
+          res.end(`1 key per hour limit reached.\nTry again at: ${retryDate.toLocaleTimeString('en-US')}`)
+          return
+        }
+        
+        // Enforce 20-second minimum delay from session start
+        // This prevents automated rapid validations
+        const elapsedSinceStart = Date.now() - startTime
+        const minimumDelay = 20000 // 20 seconds
+        
+        if (elapsedSinceStart < minimumDelay) {
+          const remainingDelay = minimumDelay - elapsedSinceStart
+          if (console.log) console.log(`[SECURITY] Validation attempt too early. Elapsed: ${elapsedSinceStart}ms, Required: ${minimumDelay}ms`)
+          
+          res.statusCode = 400
+          res.setHeader("Content-Type", "text/plain")
+          res.end(`Validation too fast. Wait ${Math.ceil(remainingDelay / 1000)}s before trying again.`)
           return
         }
         
@@ -328,6 +460,9 @@ module.exports = function adwall(config = {}) {
             }))
             return
           }
+          
+          // Token is valid! Record this validation for rate limiting
+          recordValidation(userIp)
           
           // Token is valid! Now store the encrypted key locally
           const now = Date.now()
@@ -364,8 +499,15 @@ module.exports = function adwall(config = {}) {
             res.end(JSON.stringify({ valid: true, expiresIn: expiresAt - now }))
           }
           
-          // Close server and resolve promise
-          server.close()
+          // Start periodic re-validation in background (doesn't block app)
+          // Runs every 7 minutes to detect key misuse or compromise
+          startKeyRevalidation(keyFile, maxAge)
+          
+          // Note: Don't close the server immediately - it will keep running
+          // to handle any future requests gracefully.
+          // The server will eventually be garbage collected when the process ends.
+          
+          // Resolve promise immediately so app can continue
           resolve({ valid: true, url: null })
         })
         return
