@@ -191,7 +191,7 @@ function recordValidation(ipAddress) {
 function startKeyRevalidation(keyFile, maxAge) {
   const revalidationInterval = 7 * 60 * 1000 // 7 minutes
   
-  setInterval(() => {
+  const timer = setInterval(() => {
     if (!fs.existsSync(keyFile)) return
     
     try {
@@ -217,6 +217,9 @@ function startKeyRevalidation(keyFile, maxAge) {
       } catch {}
     }
   }, revalidationInterval)
+  
+  // If main app is closed, unref is used to not hold the process in background
+  timer.unref()
 }
 
 /**
@@ -519,4 +522,3 @@ module.exports = function adwall(config = {}) {
     })
   })
 }
-
