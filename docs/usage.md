@@ -6,9 +6,9 @@ How to integrate and use Adwall in your app.
 
 ## Installation
 
-```bash
-npm install adwall
-```
+You can use adwall by download a release of your choice [here](https://github.com/zaorinu-test/releases), 
+> [!WARNING]
+> There is not a npm package for adwall, any package distributed outside github may be compromised
 
 ## Basic Example
 
