@@ -7,6 +7,9 @@ on:
       - 'client/adwall.js'
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -14,87 +17,54 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history to compare versions
       
-      - name: Get current version
-        id: current
+      - name: Parse version
+        id: version
         run: |
           VERSION=$(jq -r '.version' client/package.json)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-      
-      - name: Get previous version
-        id: previous
-        run: |
-          if git rev-parse HEAD~1 >/dev/null 2>&1; then
-            PREV_VERSION=$(git show HEAD~1:client/package.json | jq -r '.version')
-            echo "version=$PREV_VERSION" >> $GITHUB_OUTPUT
-          else
-            echo "version=0.0.0" >> $GITHUB_OUTPUT
+          TAG="v${VERSION}"
+          echo "current=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
-      
-      - name: Check if version changed
-        id: version_check
-        run: |
-          CURRENT="${{ steps.current.outputs.version }}"
-          PREVIOUS="${{ steps.previous.outputs.version }}"
-          if [ "$CURRENT" != "$PREVIOUS" ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Version changed from $PREVIOUS to $CURRENT"
-          else
-            echo "changed=false" >> $GITHUB_OUTPUT
-          fi
+          echo "exists=false" >> $GITHUB_OUTPUT
       
       - name: Setup Node.js
-        if: steps.version_check.outputs.changed == 'true'
+        if: steps.version.outputs.exists == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: '18'
       
-      - name: Install minifier
-        if: steps.version_check.outputs.changed == 'true'
-        run: npm install -g terser
-      
-      - name: Minify adwall.js
-        if: steps.version_check.outputs.changed == 'true'
+      - name: Minify and build
+        if: steps.version.outputs.exists == 'false'
         run: |
+          npm install -g terser
           terser client/adwall.js -c -m -o client/adwall.min.js
-          echo "Minified size: $(wc -c < client/adwall.min.js) bytes"
-          echo "Original size: $(wc -c < client/adwall.js) bytes"
+          
+          ORIGINAL=$(stat -f%z client/adwall.js 2>/dev/null || stat -c%s client/adwall.js)
+          MINIFIED=$(stat -f%z client/adwall.min.js 2>/dev/null || stat -c%s client/adwall.min.js)
+          REDUCTION=$(( (ORIGINAL - MINIFIED) * 100 / ORIGINAL ))
+          
+          echo "📦 Build Summary"
+          echo "Original:  ${ORIGINAL} bytes"
+          echo "Minified:  ${MINIFIED} bytes"
+          echo "Reduction: ${REDUCTION}%"
       
       - name: Create Release
-        if: steps.version_check.outputs.changed == 'true'
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        if: steps.version.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.current.outputs.version }}
-          release_name: Release ${{ steps.current.outputs.version }}
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Release ${{ steps.version.outputs.current }}
           body: |
-            # Adwall v${{ steps.current.outputs.version }}
+            ## Adwall v${{ steps.version.outputs.current }}
             
-            Contains minified and non-minified versions of adwall.js
-          draft: false
-          prerelease: false
-      
-      - name: Upload adwall.js
-        if: steps.version_check.outputs.changed == 'true'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./client/adwall.js
-          asset_name: adwall.js
-          asset_content_type: application/javascript
-      
-      - name: Upload adwall.min.js
-        if: steps.version_check.outputs.changed == 'true'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./client/adwall.min.js
-          asset_name: adwall.min.js
-          asset_content_type: application/javascript
+            📦 **Assets included:**
+            - `adwall.js` - Original with comments
+            - `adwall.min.js` - Minified version
+          files: |
+            client/adwall.js
+            client/adwall.min.js
