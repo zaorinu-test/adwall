@@ -1,0 +1,100 @@
+name: Minify and Release
+
+on:
+  push:
+    paths:
+      - 'client/package.json'
+      - 'client/adwall.js'
+    branches: [main]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history to compare versions
+      
+      - name: Get current version
+        id: current
+        run: |
+          VERSION=$(jq -r '.version' client/package.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+      
+      - name: Get previous version
+        id: previous
+        run: |
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            PREV_VERSION=$(git show HEAD~1:client/package.json | jq -r '.version')
+            echo "version=$PREV_VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "version=0.0.0" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check if version changed
+        id: version_check
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          PREVIOUS="${{ steps.previous.outputs.version }}"
+          if [ "$CURRENT" != "$PREVIOUS" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Version changed from $PREVIOUS to $CURRENT"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Setup Node.js
+        if: steps.version_check.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Install minifier
+        if: steps.version_check.outputs.changed == 'true'
+        run: npm install -g terser
+      
+      - name: Minify adwall.js
+        if: steps.version_check.outputs.changed == 'true'
+        run: |
+          terser client/adwall.js -c -m -o client/adwall.min.js
+          echo "Minified size: $(wc -c < client/adwall.min.js) bytes"
+          echo "Original size: $(wc -c < client/adwall.js) bytes"
+      
+      - name: Create Release
+        if: steps.version_check.outputs.changed == 'true'
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.current.outputs.version }}
+          release_name: Release ${{ steps.current.outputs.version }}
+          body: |
+            # Adwall v${{ steps.current.outputs.version }}
+            
+            Contains minified and non-minified versions of adwall.js
+          draft: false
+          prerelease: false
+      
+      - name: Upload adwall.js
+        if: steps.version_check.outputs.changed == 'true'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./client/adwall.js
+          asset_name: adwall.js
+          asset_content_type: application/javascript
+      
+      - name: Upload adwall.min.js
+        if: steps.version_check.outputs.changed == 'true'
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./client/adwall.min.js
+          asset_name: adwall.min.js
+          asset_content_type: application/javascript

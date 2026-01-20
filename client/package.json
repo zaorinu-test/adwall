@@ -1,6 +1,6 @@
 {
   "name": "adwall-key",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Minimal adwall validation between a Node.js app and a static page",
   
   "main": "adwall.js",
@@ -17,5 +17,13 @@
     "node": ">=18"
   },
   
-  "files": ["adwall.js"]
+  "files": ["adwall.js", "adwall.min.js"],
+  
+  "scripts": {
+    "minify": "terser adwall.js -c -m -o adwall.min.js"
+  },
+  
+  "devDependencies": {
+    "terser": "^5.27.0"
+  }
 }
