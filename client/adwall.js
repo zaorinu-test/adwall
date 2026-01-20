@@ -100,218 +100,184 @@ function hasValidKey(file, maxAge) {
 }
 
 /**
- * Main adwall validation function.
+ * Adwall validation function
  * 
- * Workflow:
- * 1. Check if valid key already exists locally
- * 2. If yes: resolve immediately with valid=true
- * 3. If no: start local HTTP server and generate session parameters
- * 4. Return adwall URL with encoded sessionId in query/hash (no direct localhost calls)
- * 5. User opens adwall page in browser (page handles timeout and validation)
- * 6. Page generates validation code and redirects to callbackUrl
- * 7. Server validates code, referrer, and sessionId
- * 8. Stores encrypted key locally
+ * Flow:
+ * 1. App generates sessionId and opens simple URL
+ * 2. User opens URL -> Pages calls /init to get params
+ * 3. User completes adwall -> Pages redirects to /link
+ * 4. App redirects to adlink (external target)
+ * 5. Adlink redirects to pages/validate
+ * 6. Pages calls /validate to complete flow
+ * 7. App validates and stores key (or asks to retry)
  * 
- * Anti-bypass measures:
- * - Session parameters encoded in URL (prevents direct localhost requests)
- * - Referrer validation to ensure requests come from adwall page
- * - SessionId expiration to prevent replay attacks
- * - Machine-specific encryption for stored keys
- * 
- * @param {Object} config - Configuration object
- * @param {string} config.adwallUrl - REQUIRED: Public adwall page URL
- * @param {string} config.adlink - REQUIRED: Target URL after successful validation (ex: https://work.ink/offer)
- * @param {string} config.sharedKey - REQUIRED: Shared secret between app and site
+ * @param {Object} config
+ * @param {string} config.key - Shared secret key
+ * @param {string} config.adwall - Adwall page URL
+ * @param {string} config.adlink - Target URL after adwall
+ * @param {number} config.time - Minimum time on adwall (ms)
  * @param {number} config.port - Local server port (default: 4173)
- * @param {string} config.keyFile - Path to store encrypted key (default: key.json)
- * @param {number} config.maxAge - Key validity in ms (default: 30 days)
- * @param {number} config.minDelay - Minimum delay before redirect in ms (default: 15000 = 15s)
- * @param {number} config.sessionTimeout - Session expiration in ms (default: 5 minutes)
- * 
- * @returns {Promise<{valid: boolean, url: string|null}>}
- * @throws {Error} If required arguments (adwallUrl, adlink, sharedKey) are missing
+ * @param {string} config.keyFile - Key storage file (default: key.json)
+ * @param {number} config.maxAge - Key validity (default: 30 days)
  * 
  * @example
  * const { valid, url } = await adwall({
- *   adwallUrl: "https://example.com/adwall",
- *   adlink: "https://work.ink/offer-xyz",
- *   sharedKey: "your-secret-key",
- *   minDelay: 10000
+ *   key: "secret123",
+ *   adwall: "https://example.com/adwall",
+ *   adlink: "https://work.ink/offer",
+ *   time: 15000
  * })
- * // Returns URL like: https://example.com/adwall?c=<encoded-params>
+ * // Returns simple URL: https://example.com/adwall
  */
 module.exports = function adwall(config = {}) {
   // Validate required arguments
-  if (!config.adwallUrl) {
-    throw new Error(
-      "Missing required argument: adwallUrl\n" +
-      "Usage: adwall({ adwallUrl: 'https://...', adlink: 'https://...', sharedKey: 'secret' })"
-    )
+  if (!config.key) {
+    throw new Error("Missing: key")
   }
-
+  if (!config.adwall) {
+    throw new Error("Missing: adwall")
+  }
   if (!config.adlink) {
-    throw new Error(
-      "Missing required argument: adlink (target URL after validation)\n" +
-      "Usage: adwall({ adwallUrl: 'https://...', adlink: 'https://...', sharedKey: 'secret' })"
-    )
+    throw new Error("Missing: adlink")
+  }
+  if (!config.time) {
+    throw new Error("Missing: time")
   }
 
-  if (!config.sharedKey) {
-    throw new Error(
-      "Missing required argument: sharedKey\n" +
-      "Usage: adwall({ adwallUrl: 'https://...', adlink: 'https://...', sharedKey: 'secret' })"
-    )
-  }
-
-  // Destructure with defaults
   const {
-    adwallUrl,
+    key,
+    adwall,
     adlink,
-    sharedKey,
+    time,
     port = 4173,
     keyFile = "key.json",
-    maxAge = 1000 * 60 * 60 * 24 * 30,
-    minDelay = 15000,  // Default 15 seconds
-    sessionTimeout = 1000 * 60 * 5  // Default 5 minutes
+    maxAge = 1000 * 60 * 60 * 24 * 30
   } = config
 
   return new Promise(resolve => {
-    // Fast path: existing valid key found, no need for validation
+    // Check if valid key exists
     if (hasValidKey(keyFile, maxAge)) {
       resolve({ valid: true, url: null })
       return
     }
 
-    // Generate session identifier and expected validation code
+    // Generate session
     const sessionId = crypto.randomUUID()
-    const expected = sha256(sessionId + sharedKey)
+    const expected = sha256(sessionId + key)
     const startTime = Date.now()
-    const adwallUrlObj = new URL(adwallUrl)
-    const expectedReferrer = adwallUrlObj.origin  // Anti-bypass: validate referrer domain
-    
-    // Encode session parameters to pass via URL (avoid direct localhost calls from remote page)
-    const sessionParams = {
-      s: sessionId,           // session id
-      c: `http://localhost:${port}/`,  // callback url
-      a: adlink,              // adwall link (target after validation)
-      d: minDelay,            // min delay
-      t: sessionTimeout,      // session timeout
-      e: Date.now() + sessionTimeout  // expiration timestamp
-    }
-    
-    // Encode as base64url for URL-safe transmission
-    const encodedParams = Buffer.from(JSON.stringify(sessionParams))
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=/g, '')
+    const adwallHost = new URL(adwall).origin
 
-    // Create local HTTP server for validation flow
+    // Store active sessions
+    const sessions = new Map()
+    sessions.set(sessionId, {
+      expected,
+      startTime,
+      minTime: time,
+      validated: false
+    })
+
     const server = http.createServer((req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`)
 
-      // Endpoint 1: /init
-      // Deprecated - kept for backward compatibility
-      // The adwall page no longer calls this directly to avoid CORS issues
+      // CORS headers
+      res.setHeader("Access-Control-Allow-Origin", adwallHost)
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST")
+      res.setHeader("Content-Type", "application/json")
+
+      // /init - Pages calls this to get session params
       if (url.pathname === "/init") {
-        res.setHeader("Content-Type", "application/json")
         res.end(JSON.stringify({
-          error: "deprecated",
-          message: "This endpoint is deprecated. Session parameters are now passed via URL.",
           sessionId,
-          callbackUrl: `http://localhost:${port}/`,
           adlink,
-          minDelay,
-          sessionTimeout,
-          expiresAt: Date.now() + sessionTimeout
+          minTime: time,
+          adwallHost
         }))
         return
       }
 
-      // Endpoint 2: /
-      // Final redirect from adwall page with validation code
-      // The site generates the validation code based on sessionId and sharedKey
-      if (url.pathname === "/") {
-        // Anti-bypass measure 1: Check referrer domain
-        const referrer = req.headers.referer || req.headers.referrer || ""
-        const referrerUrl = referrer ? new URL(referrer).origin : null
-        const referrerValid = referrerUrl === expectedReferrer
-
-        // Anti-bypass measure 2: Check session expiration
-        const elapsed = Date.now() - startTime
-        const sessionExpired = elapsed > sessionTimeout
-
-        // Anti-bypass measure 3: Enforce minimum delay
-        const valid = url.searchParams.get("v") === expected
-
-        if (!referrerValid) {
-          res.setHeader("Content-Type", "application/json")
-          res.statusCode = 403  // Forbidden
-          res.end(JSON.stringify({
-            error: "invalid_referrer",
-            message: "Request must come from the adwall page",
-            expected: expectedReferrer,
-            received: referrerUrl
-          }))
-          server.close()
-          resolve({ valid: false, url: null })
+      // /link - Redirect to adlink
+      if (url.pathname === "/link") {
+        const sid = url.searchParams.get("sid")
+        if (!sessions.has(sid)) {
+          res.statusCode = 404
+          res.end(JSON.stringify({ error: "Invalid session" }))
           return
         }
-
-        if (sessionExpired) {
-          res.setHeader("Content-Type", "application/json")
-          res.statusCode = 408  // Request Timeout
-          res.end(JSON.stringify({
-            error: "session_expired",
-            message: "Session has expired, please try again",
-            expirationTime: sessionTimeout
-          }))
-          server.close()
-          resolve({ valid: false, url: null })
-          return
-        }
-
-        if (elapsed < minDelay) {
-          res.setHeader("Content-Type", "application/json")
-          res.statusCode = 429  // Too Soon
-          res.end(JSON.stringify({
-            error: "minimum_delay_not_met",
-            message: `Wait ${minDelay - elapsed}ms before redirecting`,
-            remainingDelay: minDelay - elapsed
-          }))
-          return
-        }
-
-        // On successful validation, encrypt and store key locally
-        if (valid) {
-          fs.writeFileSync(
-            keyFile,
-            JSON.stringify(
-              encrypt({ valid: true, at: Date.now() }),
-              null,
-              2
-            )
-          )
-        }
-
-        res.setHeader("Content-Type", "application/json")
-        res.end(JSON.stringify({ valid }))
-
-        server.close()
-        resolve({ valid, url: null })
+        res.statusCode = 302
+        res.setHeader("Location", adlink)
+        res.end()
         return
       }
 
-      // Handle unknown endpoints
+      // /validate - Verify validation code
+      if (url.pathname === "/validate") {
+        const sid = url.searchParams.get("sid")
+        const v = url.searchParams.get("v")
+        const referrer = req.headers.referer || ""
+
+        const session = sessions.get(sid)
+        if (!session) {
+          res.statusCode = 404
+          res.end(JSON.stringify({ error: "Invalid session" }))
+          return
+        }
+
+        // Check referrer (must come from adlink)
+        const referrerHost = referrer ? new URL(referrer).origin : ""
+        const adlinkHost = new URL(adlink).origin
+        if (referrerHost !== adlinkHost) {
+          res.statusCode = 403
+          res.end(JSON.stringify({
+            error: "Invalid referrer",
+            message: "Please complete the adwall and try again"
+          }))
+          return
+        }
+
+        // Check elapsed time
+        const elapsed = Date.now() - session.startTime
+        if (elapsed < session.minTime) {
+          res.statusCode = 428
+          res.end(JSON.stringify({
+            error: "Too fast",
+            message: "Please try again"
+          }))
+          return
+        }
+
+        // Validate code
+        if (v !== session.expected) {
+          res.statusCode = 401
+          res.end(JSON.stringify({
+            error: "Invalid code",
+            message: "Please try again"
+          }))
+          return
+        }
+
+        // Success - store key
+        fs.writeFileSync(
+          keyFile,
+          JSON.stringify(
+            encrypt({ valid: true, at: Date.now() }),
+            null,
+            2
+          )
+        )
+
+        session.validated = true
+        res.end(JSON.stringify({ valid: true }))
+        server.close()
+        resolve({ valid: true, url: null })
+        return
+      }
+
       res.statusCode = 404
-      res.end()
+      res.end(JSON.stringify({ error: "Not found" }))
     })
 
-    // Start server and return adwall URL with encoded session parameters
-    // The adwall page receives parameters via URL, not via direct localhost calls
     server.listen(port, () => {
-      const adwallUrlWithParams = `${adwallUrl}?c=${encodedParams}`
-      resolve({ valid: false, url: adwallUrlWithParams })
+      resolve({ valid: false, url: adwall })
     })
   })
 }

@@ -2,11 +2,11 @@ const adwall = require("../client/adwall")
 
 ;(async () => {
   const { valid, url } = await adwall({
-    adwallUrl: "https://zaorinu-test.github.io/adwall",
+    key: "place_your_key_here",
+    adwall: "https://zaorinu-test.github.io/adwall",
     adlink: "https://work.ink/2fpz/cream-key",
-    sharedKey: "place_your_key_here",
-    port: 4173,
-    minDelay: 15000
+    time: 15000,
+    port: 4173
   })
 
   if (url) console.log(url)

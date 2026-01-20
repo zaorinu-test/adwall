@@ -7,48 +7,49 @@
 <body>
 <script>
 const SHARED_KEY = "place_your_key_here"
+const LOCAL_URL = "http://localhost:4173"
 
-function decodeParams(encoded) {
-  let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/')
-  base64 += '='.repeat((4 - base64.length % 4) % 4)
-  return JSON.parse(atob(base64))
-}
+let session = null
 
 async function sha256(v) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))
   return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
 }
 
-const params = new URLSearchParams(window.location.search)
-const sessionData = decodeParams(params.get('c'))
-
-if (!sessionData || Date.now() > sessionData.e) {
-  document.body.innerHTML = '<div style="padding:40px;text-align:center;">Invalid or expired session</div>'
-} else {
-  const startTime = Date.now()
-  const btn = document.createElement('button')
-  
-  btn.style.cssText = 'padding:10px 20px;font-size:14px;cursor:pointer'
-  btn.disabled = true
-  btn.textContent = 'Loading...'
-  
-  document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Adwall</h1><p>Watch this to continue</p></div>'
-  document.body.appendChild(btn)
-  
-  const tick = () => {
-    const elapsed = Date.now() - startTime
-    const remaining = Math.max(0, sessionData.d - elapsed)
-    btn.textContent = remaining > 0 ? `Wait ${Math.ceil(remaining / 1000)}s` : 'Continue'
-    btn.disabled = remaining > 0
-    if (remaining > 0) requestAnimationFrame(tick)
-  }
-  
-  tick()
-  btn.onclick = async () => {
-    const code = await sha256(sessionData.s + SHARED_KEY)
-    window.location.href = `${sessionData.c}?v=${code}`
+async function init() {
+  try {
+    const res = await fetch(`${LOCAL_URL}/init`)
+    session = await res.json()
+    
+    if (!session.sessionId) throw new Error("Invalid session")
+    
+    const startTime = Date.now()
+    const btn = document.createElement('button')
+    btn.style.cssText = 'padding:10px 20px;font-size:14px;cursor:pointer'
+    btn.disabled = true
+    
+    document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Adwall</h1><p>Complete to continue</p></div>'
+    document.body.appendChild(btn)
+    
+    const tick = () => {
+      const elapsed = Date.now() - startTime
+      const remaining = Math.max(0, session.minTime - elapsed)
+      btn.textContent = remaining > 0 ? `Wait ${Math.ceil(remaining / 1000)}s` : 'Continue'
+      btn.disabled = remaining > 0
+      if (remaining > 0) requestAnimationFrame(tick)
+    }
+    
+    tick()
+    
+    btn.onclick = () => {
+      window.location.href = `${LOCAL_URL}/link?sid=${session.sessionId}`
+    }
+  } catch (e) {
+    document.body.innerHTML = '<div style="padding:40px;text-align:center;">Error loading session</div>'
   }
 }
+
+init()
 </script>
 </body>
 </html>
