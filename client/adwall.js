@@ -341,7 +341,8 @@ module.exports = function adwall(config = {}) {
     time,
     port = 4173, // Default port, needs to be the same on web
     keyFile = "key.json",
-    maxAge = 1000 * 60 * 60 * 24 // Default: 1 day
+    maxAge = 1000 * 60 * 60 * 24, // Default: 1 day
+	debug = false
   } = config
 
   return new Promise(resolve => {
@@ -353,20 +354,35 @@ module.exports = function adwall(config = {}) {
       return
     }
 
+    // Store active sessions
+    const sessions = new Map()
+
+    // Periodically clean up old sessions to free memory
+    const sessionCleanupInterval = setInterval(() => {
+      const now = Date.now()
+      for (const [sid, session] of sessions.entries()) {
+        // Remove sessions older than 10 minutes
+        if (now - session.startTime > 10 * 60 * 1000) {
+          sessions.delete(sid)
+        }
+      }
+    }, 5 * 60 * 1000) // Run every 5 minutes
+
+    // Don't block app exit
+    sessionCleanupInterval.unref()
+
     // Generate session
     const sessionId = crypto.randomUUID()
     const expected = sha256(sessionId + key)
-    const startTime = Date.now()
-    const adwallHost = new URL(adwall).origin
-
-    // Store active sessions
-    const sessions = new Map()
+    
     sessions.set(sessionId, {
       expected,
-      startTime,
+      startTime: Date.now(),
       minTime: time,
       validated: false
     })
+	
+    const adwallHost = new URL(adwall).origin
 
     const server = http.createServer((req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`)
@@ -411,15 +427,16 @@ module.exports = function adwall(config = {}) {
       // Endpoint 3: /validate - Validate work.ink token and store key
       // Final step: receives token from work.ink, validates it, and stores encrypted key
       // Enforces 20-second minimum delay before validation
-      // Enforces rate limit: max 1 key per hour per IP
+      // Enforces rate limit: max 1 validation per 20 seconds per IP
       if (url.pathname === "/validate") {
         const token = url.searchParams.get("token")
+        const sid = url.searchParams.get("sid")
         // Extract user IP (may be proxied via x-forwarded-for header)
         const userIp = req.headers["x-forwarded-for"]?.split(",")[0] || req.connection.remoteAddress
         
-        if (!token) {
+        if (!token || !sid) {
           res.statusCode = 400
-          res.end(JSON.stringify({ error: "Missing token" }))
+          res.end(JSON.stringify({ error: "Missing token or session ID" }))
           return
         }
         
@@ -437,7 +454,22 @@ module.exports = function adwall(config = {}) {
         
         // Enforce 20-second minimum delay from session start
         // This prevents automated rapid validations
-        const elapsedSinceStart = Date.now() - startTime
+        const session = sessions.get(sid)
+
+        if (!session) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "Invalid session" }))
+          return
+        }
+
+        if (session.validated) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "Session already validated" }))
+          return
+        }
+        const now = Date.now()
+        const elapsedSinceStart = now - session.startTime        
+
         const minimumDelay = 20000 // 20 seconds
         
         if (elapsedSinceStart < minimumDelay) {
@@ -446,7 +478,7 @@ module.exports = function adwall(config = {}) {
           
           res.statusCode = 400
           res.setHeader("Content-Type", "text/plain")
-          res.end(`Validation too fast. Wait ${Math.ceil(remainingDelay / 1000)}s before trying again.`)
+          res.end(`Wait ${Math.ceil(remainingDelay / 1000)}s before trying again.`)
           return
         }
         
@@ -483,6 +515,8 @@ module.exports = function adwall(config = {}) {
             )
           )
           
+          session.validated = true
+
           // Detect if request came from browser (by User-Agent)
           const userAgent = req.headers["user-agent"] || ""
           const isBrowser = /Mozilla|Chrome|Safari|Firefox|Edg/i.test(userAgent)

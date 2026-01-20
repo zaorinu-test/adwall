@@ -4,6 +4,7 @@ const MINIMUM_VALIDATION_TIME = 20000 // 20 seconds
 const MAX_KEYS_RATE = 1
 const RATE_LIMIT_STORAGE_KEY = 'adwall_key_timestamps'
 const START_TIME_KEY = 'adwall_start_time'
+const SID_STORAGE_KEY = 'adwall_sid'
 const RATE_WINDOW_MS = 20 * 1000 // 20s
 
 /* ---------------- utils ---------------- */
@@ -94,6 +95,22 @@ const params = new URLSearchParams(window.location.search)
 const token = safeParam(params.get('token'), 256)
 const sessionId = safeParam(params.get('sid'), 128)
 
+let sid = sessionId || localStorage.getItem(SID_STORAGE_KEY)
+
+if (sid && sessionId !== sid) {
+  localStorage.setItem(SID_STORAGE_KEY, sid)
+}
+
+function redirectWithSid(url) {
+  try {
+    const u = new URL(url, location.origin)
+    if (sid) u.searchParams.set('sid', sid)
+    location.href = u.toString()
+  } catch {
+    location.href = url
+  }
+}
+
 /* ---------------- token flow ---------------- */
 
 if (token) {
@@ -102,13 +119,13 @@ if (token) {
   if (!rateCheck.allowed) {
     const retryDate = new Date(rateCheck.nextRetryTime)
     showError(`Ratelimited. Try again at ${retryDate.toLocaleTimeString('en-US')}`)
-    setTimeout(() => location.href = location.origin, 5000)
+    setTimeout(() => redirectWithSid(location.origin), 3000)
   } else {
-    location.href = `${LOCAL_URL}/validate?token=${token}`
+    redirectWithSid(`${LOCAL_URL}/validate?token=${token}`)
   }
 
 } else if (!sessionId) {
-  location.href = `${LOCAL_URL}/init?redirect=${encodeURIComponent(location.href)}`
+  redirectWithSid(`${LOCAL_URL}/init?redirect=${encodeURIComponent(location.href)}`)
 
 } else {
   /* ---------------- adwall ---------------- */
@@ -169,6 +186,6 @@ if (token) {
     used = true
     btn.disabled = true
     recordKeyValidation()
-    location.href = `${LOCAL_URL}/link?sid=${sessionId}`
+    redirectWithSid(`${LOCAL_URL}/link`)
   }
 }
