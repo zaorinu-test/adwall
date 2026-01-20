@@ -184,14 +184,13 @@ module.exports = function adwall(config = {}) {
       res.setHeader("Access-Control-Allow-Methods", "GET, POST")
       res.setHeader("Content-Type", "application/json")
 
-      // /init - Pages calls this to get session params
+      // /init - Redirect back to adwall page with sessionId
       if (url.pathname === "/init") {
-        res.end(JSON.stringify({
-          sessionId,
-          adlink,
-          minTime: time,
-          adwallHost
-        }))
+        const redirect = url.searchParams.get("redirect") || adwall
+        const sep = redirect.includes("?") ? "&" : "?"
+        res.statusCode = 302
+        res.setHeader("Location", `${redirect}${sep}sid=${sessionId}&t=${time}`)
+        res.end()
         return
       }
 

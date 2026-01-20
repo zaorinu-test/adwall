@@ -9,47 +9,45 @@
 const SHARED_KEY = "place_your_key_here"
 const LOCAL_URL = "http://localhost:4173"
 
-let session = null
+// Get sessionId from URL or redirect to /init
+const params = new URLSearchParams(window.location.search)
+const sessionId = params.get('sid')
 
-async function sha256(v) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
-}
+if (!sessionId) {
+  // Redirect to /init to get session
+  window.location.href = `${LOCAL_URL}/init?redirect=${encodeURIComponent(window.location.href)}`
+} else {
+  // We have sessionId, show adwall
+  let minTime = params.get('t') || 15000
+  minTime = parseInt(minTime)
 
-async function init() {
-  try {
-    const res = await fetch(`${LOCAL_URL}/init`)
-    session = await res.json()
-    
-    if (!session.sessionId) throw new Error("Invalid session")
-    
-    const startTime = Date.now()
-    const btn = document.createElement('button')
-    btn.style.cssText = 'padding:10px 20px;font-size:14px;cursor:pointer'
-    btn.disabled = true
-    
-    document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Adwall</h1><p>Complete to continue</p></div>'
-    document.body.appendChild(btn)
-    
-    const tick = () => {
-      const elapsed = Date.now() - startTime
-      const remaining = Math.max(0, session.minTime - elapsed)
-      btn.textContent = remaining > 0 ? `Wait ${Math.ceil(remaining / 1000)}s` : 'Continue'
-      btn.disabled = remaining > 0
-      if (remaining > 0) requestAnimationFrame(tick)
-    }
-    
-    tick()
-    
-    btn.onclick = () => {
-      window.location.href = `${LOCAL_URL}/link?sid=${session.sessionId}`
-    }
-  } catch (e) {
-    document.body.innerHTML = '<div style="padding:40px;text-align:center;">Error loading session</div>'
+  async function sha256(v) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v))
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
+  }
+
+  const startTime = Date.now()
+  const btn = document.createElement('button')
+  btn.style.cssText = 'padding:10px 20px;font-size:14px;cursor:pointer'
+  btn.disabled = true
+
+  document.body.innerHTML = '<div style="padding:40px;text-align:center;"><h1>Adwall</h1><p>Complete to continue</p></div>'
+  document.body.appendChild(btn)
+
+  const tick = () => {
+    const elapsed = Date.now() - startTime
+    const remaining = Math.max(0, minTime - elapsed)
+    btn.textContent = remaining > 0 ? `Wait ${Math.ceil(remaining / 1000)}s` : 'Continue'
+    btn.disabled = remaining > 0
+    if (remaining > 0) requestAnimationFrame(tick)
+  }
+
+  tick()
+
+  btn.onclick = () => {
+    window.location.href = `${LOCAL_URL}/link?sid=${sessionId}`
   }
 }
-
-init()
 </script>
 </body>
 </html>
