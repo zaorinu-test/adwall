@@ -1,6 +1,6 @@
 {
   "name": "adwall",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Minimal adwall validation between a Node.js app and a static page",
   
   "main": "adwall.js",

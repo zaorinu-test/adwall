@@ -103,9 +103,12 @@ function hasValidKey(file, maxAge) {
 /**
  * Validate token via work.ink API
  */
-function validateWorkinkToken(token, userIp) {
+function validateWorkinkToken(token, userIp, debug = false) {
   return new Promise((resolve) => {
-    const url = `https://work.ink/_api/v2/token/isValid/${token}?forbiddenOnFail=1`
+    const url = `https://work.ink/_api/v2/token/isValid/${token}`
+    
+    if (debug) console.log(`[DEBUG] Validating token: ${token}`)
+    if (debug) console.log(`[DEBUG] User IP: ${userIp}`)
     
     https.get(url, (res) => {
       let data = ""
@@ -113,26 +116,41 @@ function validateWorkinkToken(token, userIp) {
       res.on("end", () => {
         try {
           const response = JSON.parse(data)
+          if (debug) console.log(`[DEBUG] API Response:`, response)
           
           // Check if token is valid
           if (!response.valid) {
+            if (debug) console.log(`[DEBUG] Token invalid`)
             resolve({ valid: false, error: "Invalid token" })
             return
           }
           
-          // Validate IP address
-          if (response.info.byIp !== userIp) {
-            resolve({ valid: false, error: "IP mismatch" })
+          // Check expiration (default 30 seconds)
+          const expiresAfter = response.info.expiresAfter
+          const now = Date.now()
+          if (now > expiresAfter) {
+            if (debug) console.log(`[DEBUG] Token expired at ${new Date(expiresAfter).toISOString()}`)
+            resolve({ valid: false, error: "Token expired" })
             return
           }
           
-          // Token is valid
+          // Validate IP address (if available)
+          if (response.info.byIp && response.info.byIp !== userIp) {
+            if (debug) console.log(`[DEBUG] IP mismatch. Expected: ${response.info.byIp}, Got: ${userIp}`)
+            // Note: Don't reject on IP mismatch for now (might be behind proxy)
+            // resolve({ valid: false, error: "IP mismatch" })
+            // return
+          }
+          
+          if (debug) console.log(`[DEBUG] Token valid! Expires in ${expiresAfter - now}ms`)
           resolve({ valid: true, token: response.info.token })
         } catch (e) {
+          if (debug) console.log(`[DEBUG] Parse error:`, e.message)
           resolve({ valid: false, error: "Validation error" })
         }
       })
-    }).on("error", () => {
+    }).on("error", (e) => {
+      if (debug) console.log(`[DEBUG] API error:`, e.message)
       resolve({ valid: false, error: "API error" })
     })
   })
@@ -236,39 +254,40 @@ module.exports = function adwall(config = {}) {
       // /link - Redirect to work.ink
       if (url.pathname === "/link") {
         const sid = url.searchParams.get("sid")
-        if (!sessions.has(sid)) {
-          res.statusCode = 404
+        if (!sid || !sessions.has(sid)) {
+          res.statusCode = 400
           res.end(JSON.stringify({ error: "Invalid session" }))
           return
         }
         
-        // Redirect to work.ink with redirect back to pages/adwall
-        const adwallWithToken = `${adwall}?token={TOKEN}`
+        // Redirect to work.ink - work.ink will replace {TOKEN} with actual token
+        // and redirect back to adwall page with the token
+        const redirectUrl = `${adwall}?token={TOKEN}`
         res.statusCode = 302
-        res.setHeader("Location", `https://work.ink/2fpz/cream-key?redirect=${encodeURIComponent(adwallWithToken)}`)
+        res.setHeader("Location", `https://work.ink/2fpz/cream-key?redirect=${encodeURIComponent(redirectUrl)}`)
         res.end()
         return
       }
 
       // /validate - Validate work.ink token
       if (url.pathname === "/validate") {
-        const sid = url.searchParams.get("sid")
         const token = url.searchParams.get("token")
-        const userIp = req.headers["x-forwarded-for"] || req.connection.remoteAddress
+        const userIp = req.headers["x-forwarded-for"]?.split(",")[0] || req.connection.remoteAddress
         
-        const session = sessions.get(sid)
-        if (!session) {
-          res.statusCode = 404
-          res.end(JSON.stringify({ error: "Invalid session" }))
+        if (!token) {
+          res.statusCode = 400
+          res.end(JSON.stringify({ error: "Missing token" }))
           return
         }
         
-        // Validate token via work.ink API
-        validateWorkinkToken(token, userIp).then(result => {
+        // Validate token via work.ink API (with debugging)
+        validateWorkinkToken(token, userIp, true).then(result => {
+          res.setHeader("Content-Type", "application/json")
+          
           if (!result.valid) {
             res.statusCode = 400
             res.end(JSON.stringify({
-              error: "Token validation failed",
+              error: result.error,
               message: "Please try again"
             }))
             return
@@ -284,7 +303,7 @@ module.exports = function adwall(config = {}) {
             )
           )
           
-          session.validated = true
+          console.log("[SUCCESS] Key validated and stored")
           res.end(JSON.stringify({ valid: true }))
           server.close()
           resolve({ valid: true, url: null })

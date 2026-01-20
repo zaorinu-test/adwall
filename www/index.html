@@ -14,7 +14,7 @@ const params = new URLSearchParams(window.location.search)
 const token = params.get('token')
 const sessionId = params.get('sid')
 
-// If we have token, redirect to localhost validation
+// If we have token, redirect to localhost validation directly
 if (token) {
   window.location.href = `${LOCAL_URL}/validate?token=${token}`
 } else if (!sessionId) {
