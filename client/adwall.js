@@ -107,7 +107,9 @@ module.exports = function adwall({ adwall, adlink, keyFile = "key.json", port = 
         </script>
       `)
       
-      server.close()
+      const interval = setTimeout(() => server.close(), 12_000)
+      interval.unref()
+      
       return
     }
 
