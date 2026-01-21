@@ -95,9 +95,10 @@ const params = new URLSearchParams(window.location.search)
 const token = safeParam(params.get('token'), 256)
 const sessionId = safeParam(params.get('sid'), 128)
 
-let sid = sessionId || localStorage.getItem(SID_STORAGE_KEY)
+let sid = localStorage.getItem(SID_STORAGE_KEY)
 
-if (sid && sessionId !== sid) {
+if (sessionId) {
+  sid = sessionId
   localStorage.setItem(SID_STORAGE_KEY, sid)
 }
 
@@ -124,7 +125,7 @@ if (token) {
     redirectWithSid(`${LOCAL_URL}/validate?token=${token}`)
   }
 
-} else if (!sessionId) {
+} else if (!sid) {
   redirectWithSid(`${LOCAL_URL}/init?redirect=${encodeURIComponent(location.href)}`)
 
 } else {
