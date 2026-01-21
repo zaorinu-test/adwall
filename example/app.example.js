@@ -1,14 +1,14 @@
 const adwall = require("../client/adwall")
 
 ;(async () => {
-  const { valid, url } = await adwall({
-    key: "place_your_key_here",
+  const waitAd = adwall({
     adwall: "https://zaorinu-test.github.io/adwall",
     adlink: "https://work.ink/2fpz/cream-key",
-    time: 20000, // Increased to 20 seconds minimum for enhanced security
     port: 4173
   })
 
-  if (url) console.log(url)
-  if (valid) console.log("Key validated")
+  if (waitAd.url) {
+    console.log("Open this URL to validate:", waitAd.url)
+    await waitAd.promise
+  }
 })()
