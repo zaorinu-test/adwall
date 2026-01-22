@@ -50,6 +50,7 @@ jobs:
           terser client/adwall.js -c -m -o client/adwall.min.js
 
           # Obfuscation without sacrificing performance
+          # Disable self-defending for bundling with some apps
           javascript-obfuscator client/adwall.min.js \
             --output client/adwall.obf.js \
             --compact true \
@@ -59,7 +60,7 @@ jobs:
             --string-array true \
             --string-array-encoding base64 \
             --string-array-threshold 1 \
-            --self-defending true
+            --self-defending false
 
 
 
