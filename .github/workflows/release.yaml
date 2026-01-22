@@ -52,23 +52,21 @@ jobs:
           # Heavy Obfuscation without breaking the code
           javascript-obfuscator client/adwall.min.js \
             --output client/adwall.obf.js \
-            --compact false \
+            --compact true \
             --rename-globals false \
             --self-defending false \
             --control-flow-flattening true \
-            --control-flow-flattening-threshold 0.4 \
-            --dead-code-injection true \
-            --dead-code-injection-threshold 0.4 \
+            --control-flow-flattening-threshold 0.25 \
+            --dead-code-injection false \
             --string-array true \
             --string-array-encoding base64 \
-            --string-array-threshold 1 \
+            --string-array-threshold 0.8 \
             --split-strings true \
-            --split-strings-chunk-length 4 \
+            --split-strings-chunk-length 6 \
             --identifier-names-generator hexadecimal \
             --numbers-to-expressions true \
             --simplify true \
-            --disable-console-output true \
-            --unicode-escape-sequence true
+            --disable-console-output true
 
 
           ORIGINAL=$(stat -f%z client/adwall.js 2>/dev/null || stat -c%s client/adwall.js)
