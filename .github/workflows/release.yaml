@@ -54,17 +54,12 @@ jobs:
             --output client/adwall.obf.js \
             --compact true \
             --simplify true \
-            --rename-globals true \
+            --rename-globals false \
             --identifier-names-generator hexadecimal \
             --string-array true \
             --string-array-encoding base64 \
             --string-array-threshold 1 \
-            --split-strings false \
-            --numbers-to-expressions false \
-            --control-flow-flattening false \
-            --dead-code-injection false \
-            --self-defending false \
-            --disable-console-output true
+            --self-defending true
 
 
 
