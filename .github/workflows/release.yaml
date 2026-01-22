@@ -52,11 +52,11 @@ jobs:
           # Heavy Obfuscation without breaking the code
           javascript-obfuscator client/adwall.min.js \
             --output client/adwall.obf.js \
-            --compact true \
+            --compact false \
             --rename-globals false \
-            --self-defending true \
+            --self-defending false \
             --control-flow-flattening true \
-            --control-flow-flattening-threshold 1 \
+            --control-flow-flattening-threshold 0.4 \
             --dead-code-injection true \
             --dead-code-injection-threshold 0.4 \
             --string-array true \
