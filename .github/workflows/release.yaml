@@ -49,24 +49,23 @@ jobs:
           # Minify (ok para Node)
           terser client/adwall.js -c -m -o client/adwall.min.js
 
-          # Heavy Obfuscation without breaking the code
+          # Obfuscation without sacrificing performance
           javascript-obfuscator client/adwall.min.js \
             --output client/adwall.obf.js \
             --compact true \
-            --rename-globals false \
-            --self-defending false \
-            --control-flow-flattening true \
-            --control-flow-flattening-threshold 0.25 \
-            --dead-code-injection false \
+            --simplify true \
+            --rename-globals true \
+            --identifier-names-generator hexadecimal \
             --string-array true \
             --string-array-encoding base64 \
-            --string-array-threshold 0.8 \
-            --split-strings true \
-            --split-strings-chunk-length 6 \
-            --identifier-names-generator hexadecimal \
-            --numbers-to-expressions true \
-            --simplify true \
+            --string-array-threshold 1 \
+            --split-strings false \
+            --numbers-to-expressions false \
+            --control-flow-flattening false \
+            --dead-code-injection false \
+            --self-defending false \
             --disable-console-output true
+
 
 
           ORIGINAL=$(stat -f%z client/adwall.js 2>/dev/null || stat -c%s client/adwall.js)
