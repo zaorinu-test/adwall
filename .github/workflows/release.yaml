@@ -43,22 +43,24 @@ jobs:
         run: |
           npm install -g terser javascript-obfuscator
 
-      - name: Build (minify + obfuscate)
+      - name: Build (Node-safe minify + obfuscate)
         if: steps.version.outputs.exists == 'false'
         run: |
-          # Minify
+          # Minify (ok para Node)
           terser client/adwall.js -c -m -o client/adwall.min.js
 
-          # Obfuscate (sobre o minificado)
+          # Obfuscate (CONFIGURAÇÃO SEGURA PARA NODE)
           javascript-obfuscator client/adwall.min.js \
             --output client/adwall.obf.js \
             --compact true \
-            --control-flow-flattening true \
-            --dead-code-injection true \
+            --rename-globals false \
+            --control-flow-flattening false \
+            --dead-code-injection false \
+            --self-defending false \
             --string-array true \
-            --string-array-encoding rc4 \
-            --self-defending true \
-            --disable-console-output true
+            --string-array-encoding base64 \
+            --string-array-threshold 1 \
+            --disable-console-output false
 
           ORIGINAL=$(stat -f%z client/adwall.js 2>/dev/null || stat -c%s client/adwall.js)
           MINIFIED=$(stat -f%z client/adwall.min.js 2>/dev/null || stat -c%s client/adwall.min.js)
@@ -81,7 +83,7 @@ jobs:
             🔒 **Assets**
             - `adwall.js` — source
             - `adwall.min.js` — minified
-            - `adwall.obf.js` — hardened / obfuscated
+            - `adwall.obf.js` — node-safe obfuscated
           files: |
             client/adwall.js
             client/adwall.min.js
