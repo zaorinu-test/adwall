@@ -1,4 +1,4 @@
-name: Minify and Release
+name: Minify, Obfuscate and Release
 
 on:
   push:
@@ -13,11 +13,11 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      
+
       - name: Parse version
         id: version
         run: |
@@ -25,34 +25,50 @@ jobs:
           TAG="v${VERSION}"
           echo "current=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          
+
           if git rev-parse "${TAG}" >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
             exit 0
           fi
           echo "exists=false" >> $GITHUB_OUTPUT
-      
+
       - name: Setup Node.js
         if: steps.version.outputs.exists == 'false'
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-      
-      - name: Minify and build
+
+      - name: Install build tools
         if: steps.version.outputs.exists == 'false'
         run: |
-          npm install -g terser
+          npm install -g terser javascript-obfuscator
+
+      - name: Build (minify + obfuscate)
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          # Minify
           terser client/adwall.js -c -m -o client/adwall.min.js
-          
+
+          # Obfuscate (sobre o minificado)
+          javascript-obfuscator client/adwall.min.js \
+            --output client/adwall.obf.js \
+            --compact true \
+            --control-flow-flattening true \
+            --dead-code-injection true \
+            --string-array true \
+            --string-array-encoding rc4 \
+            --self-defending true \
+            --disable-console-output true
+
           ORIGINAL=$(stat -f%z client/adwall.js 2>/dev/null || stat -c%s client/adwall.js)
           MINIFIED=$(stat -f%z client/adwall.min.js 2>/dev/null || stat -c%s client/adwall.min.js)
-          REDUCTION=$(( (ORIGINAL - MINIFIED) * 100 / ORIGINAL ))
-          
+          OBFUSCATED=$(stat -f%z client/adwall.obf.js 2>/dev/null || stat -c%s client/adwall.obf.js)
+
           echo "📦 Build Summary"
-          echo "Original:  ${ORIGINAL} bytes"
-          echo "Minified:  ${MINIFIED} bytes"
-          echo "Reduction: ${REDUCTION}%"
-      
+          echo "Original:   ${ORIGINAL} bytes"
+          echo "Minified:   ${MINIFIED} bytes"
+          echo "Obfuscated: ${OBFUSCATED} bytes"
+
       - name: Create Release
         if: steps.version.outputs.exists == 'false'
         uses: softprops/action-gh-release@v1
@@ -61,10 +77,12 @@ jobs:
           name: Release ${{ steps.version.outputs.current }}
           body: |
             ## Adwall v${{ steps.version.outputs.current }}
-            
-            📦 **Assets included:**
-            - `adwall.js` - Original with comments
-            - `adwall.min.js` - Minified version
+
+            🔒 **Assets**
+            - `adwall.js` — source
+            - `adwall.min.js` — minified
+            - `adwall.obf.js` — hardened / obfuscated
           files: |
             client/adwall.js
             client/adwall.min.js
+            client/adwall.obf.js
