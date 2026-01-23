@@ -54,11 +54,11 @@ jobs:
           javascript-obfuscator client/adwall.min.js \
             --output client/adwall.obf.js \
             --compact true \
-            --simplify true \
-            --rename-globals false \
+            --simplify false \
+            --rename-globals true \
             --identifier-names-generator hexadecimal \
             --string-array true \
-            --string-array-encoding base64 \
+            --string-array-encoding rc4 \
             --string-array-threshold 1 \
             --self-defending false
 
