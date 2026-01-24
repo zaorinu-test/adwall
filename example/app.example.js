@@ -1,18 +1,5 @@
-// Adwall Snippet (latest)
-const adwall = require("../client/adwall")
+import { init } from "../client/index.js"
 
-;(async () => {
-  const gate = adwall({
-    adwall: "https://zaorinu-test.github.io/adwall",
-    adlink: "https://work.ink/2fpz/cream-key",
-    port: 4173
-  })
+await init()
 
-  if (!gate.validated) {
-    console.log("Open to validate:", gate.url)
-  }
-  await gate.ready
-  console.log("Adwall validated, welcome to Cream!")
-})()
-
-// Code logic after validation
+console.log("App initialized")
