@@ -4,7 +4,7 @@ on:
   push:
     paths:
       - 'client/package.json'
-      - 'client/adwall.js'
+      - 'client/modules/adwall.js'
     branches: [main]
 
 permissions:
@@ -47,12 +47,12 @@ jobs:
         if: steps.version.outputs.exists == 'false'
         run: |
           # Minify (ok para Node)
-          terser client/adwall.js -c -m -o client/adwall.min.js
+          terser client/modules/adwall.js -c -m -o client/modules/adwall.min.js
 
           # Obfuscation without sacrificing performance
           # Disable self-defending for bundling with some apps
-          javascript-obfuscator client/adwall.min.js \
-            --output client/adwall.obf.js \
+          javascript-obfuscator client/modules/adwall.min.js \
+            --output client/modules/adwall.obf.js \
             --compact true \
             --simplify false \
             --rename-globals true \
@@ -62,11 +62,9 @@ jobs:
             --string-array-threshold 1 \
             --self-defending false
 
-
-
-          ORIGINAL=$(stat -f%z client/adwall.js 2>/dev/null || stat -c%s client/adwall.js)
-          MINIFIED=$(stat -f%z client/adwall.min.js 2>/dev/null || stat -c%s client/adwall.min.js)
-          OBFUSCATED=$(stat -f%z client/adwall.obf.js 2>/dev/null || stat -c%s client/adwall.obf.js)
+          ORIGINAL=$(stat -f%z client/modules/adwall.js 2>/dev/null || stat -c%s client/modules/adwall.js)
+          MINIFIED=$(stat -f%z client/modules/adwall.min.js 2>/dev/null || stat -c%s client/modules/adwall.min.js)
+          OBFUSCATED=$(stat -f%z client/modules/adwall.obf.js 2>/dev/null || stat -c%s client/modules/adwall.obf.js)
 
           echo "📦 Build Summary"
           echo "Original:   ${ORIGINAL} bytes"
@@ -87,6 +85,6 @@ jobs:
             - `adwall.min.js` — minified
             - `adwall.obf.js` — node-safe obfuscated
           files: |
-            client/adwall.js
-            client/adwall.min.js
-            client/adwall.obf.js
+            client/modules/adwall.js
+            client/modules/adwall.min.js
+            client/modules/adwall.obf.js
