@@ -1,4 +1,5 @@
 // client/adwall.js
+// Deprecated, will be converted to TypeScript in future updates
 const http = require("http")
 const https = require("https")
 const crypto = require("crypto")
