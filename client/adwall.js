@@ -41,20 +41,21 @@ function fetchWorkink(token) {
 
 module.exports = function adwall({ adwall, adlink, keyFile = "key.json", port = 4173 }) {
   // --- Promise que resolve quando a key é validada ---
-  let resolveValidated
-  const validatedPromise = new Promise(resolve => { resolveValidated = resolve })
+  let resolveReady
+  const ready = new Promise(r => { resolveReady = r })
 
   // --- checa se já tem key válida ---
   if (fs.existsSync(keyFile)) {
     try {
-      const raw = fs.readFileSync(keyFile, "utf8")
-      const data = decrypt(JSON.parse(raw))
+
+      const raw = JSON.parse(fs.readFileSync(keyFile, "utf8"))
+      if (sign(raw.data) !== raw.sig) throw new Error("Invalid Signature")
+      
+      resolveReady()
       return {
+        validated: true,
         url: null,
-        promise: (async () => {
-          const info = await fetchWorkink(data.token)
-          if (info && info.valid) return { valid: true, token: data.token }
-        })()
+        ready
       }
     } catch {}
   }
@@ -65,6 +66,7 @@ module.exports = function adwall({ adwall, adlink, keyFile = "key.json", port = 
     const url = new URL(req.url, `http://${req.headers.host}`)
 
     if (url.pathname === "/init") {
+      // Redirects to adlink and marks init time
       initAt = Date.now()
       res.writeHead(302, { Location: adlink })
       return res.end()
@@ -84,7 +86,6 @@ module.exports = function adwall({ adwall, adlink, keyFile = "key.json", port = 
       }
 
       const encrypted = encrypt({
-        valid: true,
         token,
         expiresAt: info.info?.expiresAfter || null,
         at: Date.now()
@@ -94,7 +95,8 @@ module.exports = function adwall({ adwall, adlink, keyFile = "key.json", port = 
       res.writeHead(302, { Location: "/success" })
       res.end()
 
-      resolveValidated({ valid: true, token })
+      resolveReady()
+      setTimeout(() => server.close(), 12000).unref()
       return
     }
 
@@ -106,9 +108,6 @@ module.exports = function adwall({ adwall, adlink, keyFile = "key.json", port = 
           setTimeout(() => { window.close() }, 10000)
         </script>
       `)
-      
-      const interval = setTimeout(() => server.close(), 12_000)
-      interval.unref()
       
       return
     }
@@ -129,5 +128,9 @@ module.exports = function adwall({ adwall, adlink, keyFile = "key.json", port = 
 
   server.listen(port)
 
-  return { url: adwall, promise: validatedPromise }
+  return {
+    validated: false,
+    url: adwall,
+    ready
+  }
 }
